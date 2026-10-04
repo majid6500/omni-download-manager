@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni-download-manager"
+version = "0.1.0"
+description = "Omni Download Manager (ODM) for Windows"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6>=6.6,<7",
+    "requests>=2.31,<3",
+]
+
+[project.gui-scripts]
+odm = "omni_download_manager.app:main"
+
+[tool.setuptools.packages.find]
+include = ["omni_download_manager*"]
+
+[tool.setuptools.package-data]
+omni_download_manager = ["resources/**/*"]
