@@ -236,6 +236,7 @@ PyInstaller configuration is provided in the project.
 
 ```bat
 python -m pip install pyinstaller
+python scripts\make_icon.py
 pyinstaller --noconfirm packaging\omni_download_manager.spec
 ```
 
@@ -408,6 +409,7 @@ ODM_DATA_DIR
 
 ```bat
 python -m pip install pyinstaller
+python scripts\make_icon.py
 pyinstaller --noconfirm packaging\omni_download_manager.spec
 ```
 

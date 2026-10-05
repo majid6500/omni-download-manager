@@ -14,8 +14,8 @@ def main() -> None:
     root = Path(__file__).resolve().parent.parent
     resources = root / "omni_download_manager" / "resources"
     assets = (
-        (root / "icon.ico", resources / "app.ico", b"\x00\x00\x01\x00"),
-        (root / "icon.png", resources / "app.png", b"\x89PNG\r\n\x1a\n"),
+        (root / "OMD icon.ico", resources / "app.ico", b"\x00\x00\x01\x00"),
+        (root / "OMD icon.png", resources / "app.png", b"\x89PNG\r\n\x1a\n"),
     )
     for source, target, signature in assets:
         data = source.read_bytes()
