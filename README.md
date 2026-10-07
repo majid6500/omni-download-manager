@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable Windows Build</b> · <b>114 Tests Passing</b>
+  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>117 Tests Passing</b>
 </p>
 
 ---
@@ -60,7 +60,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 - Search by filename or URL.
 - Sort by newest, oldest, filename, or file size.
 - File-type categories: Archives, Video, Audio, Images, Documents, Programs, and Other.
-- Multi-selection with `Ctrl` / `Shift`.
+- Multi-selection with `Ctrl` / `Shift`; a plain click selects a single row.
 - Bulk pause, resume, cancel, and remove actions.
 - Open downloaded files or their containing folders.
 - Copy download URLs from the context menu.
@@ -83,7 +83,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 
 ## 🖼️ Screenshots
 
-> The screenshot gallery will be restored after clean, anonymized screenshots are ready. The current source images contain personal paths and filenames.
+> Screenshot source images live in `assets/` and are **not** published here yet: they still show personal paths and filenames (for example the default download folder). Re-take them with a clean profile before embedding the gallery.
 
 ---
 
@@ -97,6 +97,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 | Database | SQLite / `sqlite3` |
 | Settings | JSON |
 | Packaging | PyInstaller |
+| Installer | Inno Setup |
 | Testing | Python `unittest` |
 
 The runtime dependency set is intentionally small: **PySide6** and **requests** are the main third-party dependencies.
@@ -141,13 +142,19 @@ odm
 
 ## 📦 Portable Windows Version
 
-ODM can be distributed as a portable Windows application.
+ODM is distributed in two ways: a portable folder and a Windows Setup installer.
+
+### Portable
 
 1. Extract the ZIP package completely.
 2. Keep the `_internal` folder next to `Omni Download Manager.exe`.
 3. Run `Omni Download Manager.exe`.
 
-> **Important:** the current Windows release is **Portable**, not a traditional Setup/Installer package. Do not separate the executable from `_internal`.
+> **Important:** the portable executable must not be separated from `_internal`.
+
+### Setup installer
+
+The Inno Setup script `omni download manager v 0.1.0.iss` packages the same folder into `installer\Omni-Download-Manager-Setup.exe`. See [Build a Windows Release](#-build-a-windows-release).
 
 ---
 
@@ -159,7 +166,7 @@ Run the complete test suite with:
 python -m unittest discover -s tests -t .
 ```
 
-The current verified suite contains **114 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, category filtering, system-proxy configuration, search/sorting, bulk actions, persistence, completion notifications, and icon loading.
+The current verified suite contains **117 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, completion notifications, and icon loading.
 
 Download-related tests use a **local HTTP server**, so they do not depend on an external download service.
 
@@ -244,6 +251,18 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 
 The build produces a folder-based portable application containing the executable and `_internal` directory. The complete output folder should be packaged for distribution.
 
+### Build the Setup installer
+
+With [Inno Setup 6 or 7](https://jrsoftware.org/isinfo.php) installed:
+
+```bat
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.1.0.iss"
+```
+
+The script reads `dist\Omni Download Manager\*` (relative to the repository root, so it works from any checkout) and writes `installer\Omni-Download-Manager-Setup.exe`.
+
+> `dist\` and `installer\` are build output and are excluded from version control. Rebuild the portable folder before compiling the installer so the package contains the current code.
+
 ---
 
 ## ⚠️ Current Limitations
@@ -255,7 +274,7 @@ The project is intentionally focused on its current core feature set. The follow
 - Browser integration for automatically capturing download links.
 - Account login, cookies, or configurable custom request headers.
 - A dedicated manual-proxy configuration interface; the current option uses the system proxy.
-- Traditional installer/setup packaging.
+- Resuming a download from a server that refuses HTTP `Range` requests.
 
 ---
 
@@ -319,7 +338,7 @@ describing the project as open source or redistributing it.
 
 رابط کاربری با **PySide6 / Qt 6** ساخته شده و شامل صفحات اصلی دانلودها، وضعیت دانلود، جست‌وجو، مرتب‌سازی، فیلترها، دیالوگ افزودن دانلود و تنظیمات است.
 
-گالری اسکرین‌شات‌ها پس از آماده‌شدن تصاویر تمیز و بدون مسیرها و نام‌فایل‌های شخصی دوباره اضافه می‌شود.
+گالری اسکرین‌شات‌ها هنوز در README قرار نگرفته است: تصاویر خام در پوشهٔ `assets/` هستند و مسیرها و نام‌فایل‌های شخصی (مثل پوشهٔ پیش‌فرض دانلود) را نشان می‌دهند. پیش از انتشار، اسکرین‌شات‌ها را با پروفایل تمیز دوباره بگیرید.
 
 ## 🚀 اجرای پروژه در ویندوز
 
@@ -346,7 +365,9 @@ python -m omni_download_manager
 
 ## 📦 نسخهٔ Portable
 
-نسخهٔ ویندوزی فعلی **Portable** است و نصب‌کنندهٔ Setup نیست.
+نسخهٔ ویندوزی به دو شکل توزیع می‌شود: پوشهٔ Portable و نصب‌کنندهٔ Setup.
+
+### Portable
 
 بعد از استخراج ZIP، فایل زیر را اجرا کنید:
 
@@ -356,6 +377,10 @@ Omni Download Manager.exe
 
 پوشهٔ `_internal` باید در کنار فایل EXE باقی بماند.
 
+### نصب‌کنندهٔ Setup
+
+اسکریپت Inno Setup با نام `omni download manager v 0.1.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
+
 ## 🧪 تست‌ها
 
 برای اجرای تست‌ها:
@@ -364,7 +389,7 @@ Omni Download Manager.exe
 python -m unittest discover -s tests -t .
 ```
 
-در آخرین اجرای تأییدشده، **هر ۱۱۴ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، فیلتر، جست‌وجو، ذخیره‌سازی و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
+در آخرین اجرای تأییدشده، **هر ۱۱۷ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و fallback آن، مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، انتشار رویدادها خارج از قفل مدیر، فیلتر، جست‌وجو، ذخیره‌سازی، رفتار انتخاب در فهرست و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
 
 تست‌های دانلود از یک HTTP server محلی استفاده می‌کنند و به سرویس دانلود خارجی وابسته نیستند.
 
@@ -418,6 +443,18 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 
 خروجی شامل فایل اجرایی و پوشهٔ `_internal` است و برای توزیع باید کل پوشه بسته‌بندی شود.
 
+### ساخت نصب‌کنندهٔ Setup
+
+با نصب بودن [Inno Setup نسخهٔ ۶ یا ۷](https://jrsoftware.org/isinfo.php):
+
+```bat
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.1.0.iss"
+```
+
+اسکریپت محتوای `dist\Omni Download Manager\*` را می‌خواند (مسیرها نسبی هستند و از هر checkout کار می‌کنند) و خروجی را در `installer\Omni-Download-Manager-Setup.exe` می‌نویسد.
+
+> پوشه‌های `dist\` و `installer\` خروجی build هستند و در کنترل نسخه ثبت نمی‌شوند. پیش از ساخت نصب‌کننده، پوشهٔ Portable را دوباره بسازید تا بسته شامل کد به‌روز باشد.
+
 ## ⚠️ محدودیت‌های فعلی
 
 در نسخهٔ `0.1.0` موارد زیر هنوز پیاده‌سازی نشده‌اند:
@@ -427,7 +464,7 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 - اتصال مستقیم به مرورگر برای دریافت خودکار لینک دانلود.
 - ورود به حساب، Cookie و Header سفارشی قابل تنظیم.
 - رابط مستقل برای تنظیم دستی Proxy.
-- نصب‌کنندهٔ سنتی Setup/Installer.
+- ادامهٔ دانلود از سروری که از HTTP `Range` پشتیبانی نمی‌کند.
 
 ## 📄 مجوز
 

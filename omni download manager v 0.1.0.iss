@@ -1,6 +1,6 @@
 #define MyAppName "Omni Download Manager"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "NIK Shop"
+#define MyAppVersion "0.1.0"
+#define MyAppPublisher "Omni Download Manager"
 #define MyAppExeName "Omni Download Manager.exe"
 
 [Setup]
@@ -20,25 +20,28 @@ SolidCompression=yes
 
 ArchitecturesInstallIn64BitMode=x64compatible
 
-SetupIconFile="E:\Cluade\omni-download-manager ODM\dist\Omni Download Manager\OMD icon.ico"
+; Paths are relative to this script so the build works from any checkout.
+; The executable already carries the icon, so shortcuts and the uninstall entry
+; point at it instead of a loose .ico file (which PyInstaller does not copy).
+SetupIconFile="omni_download_manager\resources\app.ico"
 
-UninstallDisplayIcon={app}\OMD icon.ico
+UninstallDisplayIcon={app}\Omni Download Manager.exe
 
 PrivilegesRequired=admin
 
 [Files]
-Source: "E:\Cluade\omni-download-manager ODM\dist\Omni Download Manager\*"; \
+Source: "dist\Omni Download Manager\*"; \
     DestDir: "{app}"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; \
     Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{app}\OMD icon.ico"
+    IconFilename: "{app}\{#MyAppExeName}"
 
 Name: "{autodesktop}\{#MyAppName}"; \
     Filename: "{app}\{#MyAppExeName}"; \
-    IconFilename: "{app}\OMD icon.ico"
+    IconFilename: "{app}\{#MyAppExeName}"
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; \
