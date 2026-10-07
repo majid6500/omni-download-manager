@@ -13,7 +13,7 @@ from omni_download_manager.engine.segments import (
     segment_file_path,
     total_downloaded_from_state,
 )
-from tests.support import PAYLOAD, TestServer, wait_for
+from tests.support import FAILING_SEGMENT_PAYLOAD, PAYLOAD, TestServer, wait_for
 from tests.test_engine import Recorder
 
 
@@ -99,6 +99,39 @@ class MultiPartEngineTests(unittest.TestCase):
         self.assertEqual(outcome.kind, OutcomeKind.COMPLETED)
         self.assertEqual(outcome.path.read_bytes(), PAYLOAD)
         self.assertEqual(recorder.metadata.transfer_mode, "single")
+
+    def test_failed_segment_stops_siblings_before_single_fallback(self) -> None:
+        """A failing segment must not fall back while other workers still write."""
+
+        class _Watcher(Recorder):
+            """Records which segment files exist when the single connection starts."""
+
+            def __init__(self, directory: Path) -> None:
+                super().__init__()
+                self.directory = directory
+                self.seg_files_when_single_started: list[str] | None = None
+
+            def metadata_received(self, metadata) -> None:
+                super().metadata_received(metadata)
+                if metadata.transfer_mode == "single" and self.seg_files_when_single_started is None:
+                    self.seg_files_when_single_started = sorted(
+                        p.name for p in self.directory.glob("*.part.seg*")
+                    )
+
+        recorder = _Watcher(self.dir)
+        outcome = self.engine.download(
+            self.job("/forbidden-segment.bin"), DownloadControl(), recorder
+        )
+
+        self.assertEqual(outcome.kind, OutcomeKind.COMPLETED)
+        self.assertEqual(outcome.path.read_bytes(), FAILING_SEGMENT_PAYLOAD)
+        # The fallback may only start once every segment worker has stopped and its
+        # file has been removed - otherwise Windows leaves orphaned *.part.seg* files.
+        self.assertEqual(recorder.seg_files_when_single_started, [])
+        self.assertEqual(list(self.dir.glob("*.part.seg*")), [])
+        self.assertEqual(list(self.dir.glob("*.part")), [])
+        # Only the finished file is left behind.
+        self.assertEqual(sorted(p.name for p in self.dir.iterdir()), [outcome.path.name])
 
     def test_pause_keeps_segment_files(self) -> None:
         control = DownloadControl()

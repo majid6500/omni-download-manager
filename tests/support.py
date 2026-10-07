@@ -11,6 +11,9 @@ from typing import Callable
 
 PAYLOAD = random.Random(1234).randbytes(1_500_000)
 SLOW_PAYLOAD = random.Random(99).randbytes(2_000_000)
+# Big enough to be split into segments, small enough for a fast test, and served
+# slowly so the sibling segments are still writing when one of them fails.
+FAILING_SEGMENT_PAYLOAD = SLOW_PAYLOAD[:1_200_000]
 ETAG = '"payload-v1"'
 
 
@@ -61,6 +64,18 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_chunked(PAYLOAD[:200_000])
         elif path == "/short.bin":
             self._send_truncated()
+        elif path == "/forbidden-segment.bin":
+            # The range covering the second quarter of the file is refused, which
+            # makes exactly one multi-part segment give up and force a fallback.
+            self._send_bytes(
+                FAILING_SEGMENT_PAYLOAD,
+                piece=16384,
+                delay=0.01,
+                fail_range=(
+                    len(FAILING_SEGMENT_PAYLOAD) // 4,
+                    len(FAILING_SEGMENT_PAYLOAD) // 2,
+                ),
+            )
         else:
             self._send_status(404)
 
@@ -96,6 +111,7 @@ class _Handler(BaseHTTPRequestHandler):
         piece: int = 65536,
         delay: float = 0.0,
         extra: dict[str, str] | None = None,
+        fail_range: tuple[int, int] | None = None,
     ) -> None:
         start, status = 0, 200
         end = len(data) - 1
@@ -106,6 +122,10 @@ class _Handler(BaseHTTPRequestHandler):
             if match:
                 start = int(match.group(1))
                 end = int(match.group(2)) if match.group(2) else end
+                if fail_range is not None and fail_range[0] <= start < fail_range[1]:
+                    # A range the server always refuses: not retryable for the client.
+                    self._send_status(403)
+                    return
                 if start >= len(data):
                     self.send_response(416)
                     self.send_header("Content-Range", f"bytes */{len(data)}")

@@ -98,6 +98,15 @@ def remove_segment_files(directory: Path, filename: str) -> None:
             path.unlink(missing_ok=True)
         except OSError:
             logger.warning("Could not delete segment file %s", path, exc_info=True)
+    leftovers = list_segment_files(directory, filename)
+    if leftovers:
+        # Should not happen: callers only clean up once every segment worker has
+        # closed its file. Reported so an orphaned *.part.seg* is never silent.
+        logger.warning(
+            "Segment files left behind for %s: %s",
+            filename,
+            ", ".join(path.name for path in leftovers),
+        )
 
 
 def segment_downloaded_bytes(path: Path) -> int:

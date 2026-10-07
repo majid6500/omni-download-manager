@@ -285,7 +285,11 @@ class MultiPartHttpDownloader:
         stalled: list[bool] = [False] * len(state.segments)
         meter = SpeedMeter(initial_bytes=total_downloaded_from_state(state))
         last_report = time.monotonic()
+        # Set when the multi-part run has to stop without a user pause/cancel (a
+        # sibling segment failed, or the transfer is aborting): every segment worker
+        # exits at the next check so no file is written while it is being cleaned up.
         stop_event = threading.Event()
+        fallback_index: int | None = None
 
         def report_progress(force: bool = False) -> None:
             nonlocal last_report
@@ -335,63 +339,70 @@ class MultiPartHttpDownloader:
 
         report_progress(force=True)
 
-        with requests.Session() as session:
-            session.headers.update(
-                {
-                    "User-Agent": self._user_agent,
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                }
-            )
-            proxies = None if job.use_system_proxy else {"http": "", "https": ""}
+        # One requests.Session per segment worker: requests documents Session as not
+        # thread-safe, so a shared one races on its connection pool.
+        proxies = None if job.use_system_proxy else {"http": "", "https": ""}
 
-            with ThreadPoolExecutor(max_workers=len(state.segments)) as pool:
-                futures: dict[Future[bool], int] = {}
-                for segment in state.segments:
-                    if segment.complete:
-                        continue
-                    futures[
-                        pool.submit(
-                            self._download_segment,
-                            session,
-                            job,
-                            state.total_bytes,
-                            segment,
-                            control,
-                            update_segment,
-                            on_status,
-                            proxies,
-                        )
-                    ] = segment.index
+        with ThreadPoolExecutor(max_workers=len(state.segments)) as pool:
+            futures: dict[Future[bool], int] = {}
+            for segment in state.segments:
+                if segment.complete:
+                    continue
+                futures[
+                    pool.submit(
+                        self._download_segment,
+                        job,
+                        state.total_bytes,
+                        segment,
+                        control,
+                        stop_event,
+                        update_segment,
+                        on_status,
+                        proxies,
+                    )
+                ] = segment.index
 
-                while futures:
-                    if control.stop_requested:
+            while futures:
+                if control.stop_requested:
+                    stop_event.set()
+                    _cancel_pending(futures)
+                    break
+                done, _ = wait(futures.keys(), timeout=0.2, return_when=FIRST_COMPLETED)
+                for future in done:
+                    index = futures.pop(future)
+                    try:
+                        ok = future.result()
+                    except AppError:
                         stop_event.set()
-                        for future in futures:
-                            future.cancel()
+                        _cancel_pending(futures)
+                        raise
+                    except Exception as exc:
+                        stop_event.set()
+                        _cancel_pending(futures)
+                        logger.exception("Segment %d failed unexpectedly", index)
+                        raise NetworkError(
+                            "A segment failed unexpectedly.", detail=repr(exc), retryable=True
+                        ) from exc
+                    if not ok:
+                        logger.warning(
+                            "Segment %d failed for %s; falling back to single connection",
+                            index,
+                            job.url,
+                        )
+                        fallback_index = index
+                        # Stop the sibling segments and leave this block before touching
+                        # any file: the pool's exit waits until every worker has returned
+                        # and closed its segment file. Deleting here would race with
+                        # writers and, on Windows, fail on the open handle and leave
+                        # orphaned *.part.seg* files behind.
+                        stop_event.set()
+                        _cancel_pending(futures)
                         break
-                    done, _ = wait(futures.keys(), timeout=0.2, return_when=FIRST_COMPLETED)
-                    for future in done:
-                        index = futures.pop(future)
-                        try:
-                            ok = future.result()
-                        except AppError:
-                            raise
-                        except Exception as exc:
-                            logger.exception("Segment %d failed unexpectedly", index)
-                            raise NetworkError(
-                                "A segment failed unexpectedly.", detail=repr(exc), retryable=True
-                            ) from exc
-                        if not ok:
-                            logger.warning(
-                                "Segment %d failed for %s; falling back to single connection",
-                                index,
-                                job.url,
-                            )
-                            self._abort_multipart(job)
-                            fallback_job = replace(job, transfer_mode="single", multipart_resume=None)
-                            return self._single.download(fallback_job, control, observer)
-                    report_progress()
+                if fallback_index is not None:
+                    break
+                report_progress()
+        # From here on no segment worker is running, so the segment files are closed
+        # and safe to delete or read.
 
         if control.stop_requested:
             with progress_lock:
@@ -426,6 +437,14 @@ class MultiPartHttpDownloader:
                 self._abort_multipart(job)
                 return DownloadOutcome(OutcomeKind.CANCELLED, None, 0, state.total_bytes)
             return DownloadOutcome(OutcomeKind.PAUSED, None, downloaded, state.total_bytes)
+
+        if fallback_index is not None:
+            # A segment gave up for good. Every worker has stopped and closed its
+            # file, so the partial segments can be discarded before the single
+            # connection restarts the transfer.
+            self._abort_multipart(job)
+            fallback_job = replace(job, transfer_mode="single", multipart_resume=None)
+            return self._single.download(fallback_job, control, observer)
 
         with progress_lock:
             final_state = state_holder[0]
@@ -473,11 +492,45 @@ class MultiPartHttpDownloader:
 
     def _download_segment(
         self,
+        job: DownloadJob,
+        total_bytes: int,
+        segment: SegmentProgress,
+        control: DownloadControl,
+        stop_event: threading.Event,
+        on_progress: Callable[[int, int], None],
+        on_status: Callable[[int, int, bool], None],
+        proxies: dict[str, str] | None,
+    ) -> bool:
+        """Download one byte range on its own connection.
+
+        ``stop_event`` is set by the caller when the whole multi-part run is being
+        aborted (a sibling segment failed, or the transfer is stopping); the worker
+        then returns at the next check so the caller can wait for every file to be
+        closed before cleaning up.
+        """
+        # A session per segment keeps connection state off shared, non-thread-safe
+        # objects while preserving the exact headers used before.
+        with requests.Session() as session:
+            session.headers.update(
+                {
+                    "User-Agent": self._user_agent,
+                    "Accept": "*/*",
+                    "Accept-Encoding": "identity",
+                }
+            )
+            return self._transfer_segment(
+                session, job, total_bytes, segment, control, stop_event,
+                on_progress, on_status, proxies,
+            )
+
+    def _transfer_segment(
+        self,
         session: requests.Session,
         job: DownloadJob,
         total_bytes: int,
         segment: SegmentProgress,
         control: DownloadControl,
+        stop_event: threading.Event,
         on_progress: Callable[[int, int], None],
         on_status: Callable[[int, int, bool], None],
         proxies: dict[str, str] | None,
@@ -495,7 +548,7 @@ class MultiPartHttpDownloader:
                 # Do not let UI reporting break the download logic.
                 pass
 
-            if control.stop_requested:
+            if control.stop_requested or stop_event.is_set():
                 return True
             if local >= segment.length:
                 on_progress(segment.index, segment.length)
@@ -532,7 +585,7 @@ class MultiPartHttpDownloader:
                     on_status(segment.index, attempt + 1, True)
                 except Exception:
                     pass
-                if control.wait_for_stop(delay):
+                if _wait_during_backoff(control, stop_event, delay):
                     return True
                 # Clear stalled flag before next attempt; update will happen at loop top.
                 try:
@@ -561,7 +614,7 @@ class MultiPartHttpDownloader:
                             on_status(segment.index, attempt + 1, True)
                         except Exception:
                             pass
-                        if control.wait_for_stop(delay):
+                        if _wait_during_backoff(control, stop_event, delay):
                             return True
                         try:
                             on_status(segment.index, attempt + 1, False)
@@ -591,7 +644,7 @@ class MultiPartHttpDownloader:
                 iterator = response.iter_content(self._chunk_size)
                 with handle:
                     while local < segment.length:
-                        if control.stop_requested:
+                        if control.stop_requested or stop_event.is_set():
                             on_progress(segment.index, local)
                             return True
                         chunk = _next_chunk(iterator)
@@ -623,7 +676,7 @@ class MultiPartHttpDownloader:
                         on_status(segment.index, attempt + 1, True)
                     except Exception:
                         pass
-                    if control.wait_for_stop(delay):
+                    if _wait_during_backoff(control, stop_event, delay):
                         return True
                     try:
                         on_status(segment.index, attempt + 1, False)
@@ -643,6 +696,38 @@ class MultiPartHttpDownloader:
         remove_segment_files(job.directory, job.filename)
         part_path = job.directory / (job.filename + ".part")
         _remove_quietly(part_path)
+
+
+def _cancel_pending(futures: dict[Future[bool], int]) -> None:
+    """Drop queued segment work; workers already running stop at their next check.
+
+    Waiting for those workers to actually finish is the pool block's job: leaving it
+    blocks until every segment thread has returned and closed its file.
+    """
+    for future in futures:
+        future.cancel()
+    futures.clear()
+
+
+def _wait_during_backoff(
+    control: DownloadControl, stop_event: threading.Event, delay: float
+) -> bool:
+    """Sleep through a segment retry backoff.
+
+    Returns True when the transfer should stop, either because the user paused or
+    cancelled (``control``) or because the multi-part run was aborted (``stop_event``).
+    The wait is sliced so an abort raised by a sibling segment is noticed at once
+    instead of after the whole backoff.
+    """
+    deadline = time.monotonic() + delay
+    while True:
+        if control.stop_requested or stop_event.is_set():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if stop_event.wait(min(remaining, 0.1)):
+            return True
 
 
 def _job_with_probe(job: DownloadJob, probe: _ProbeResult) -> DownloadJob:
