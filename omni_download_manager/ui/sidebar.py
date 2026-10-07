@@ -126,3 +126,14 @@ class Sidebar(QWidget):
     def set_counts(self, counts: dict[ViewFilter, int]) -> None:
         for view, count in counts.items():
             self._buttons[view.value].set_count(count)
+
+    def select(self, key: str) -> None:
+        """Select a view from code, keeping the highlighted button in sync.
+
+        ``selected.emit(...)`` alone only runs the slot; the checked state of the
+        buttons changes on ``clicked``, so the highlight would go out of sync.
+        """
+        button = self._buttons.get(key)
+        if button is not None:
+            button.setChecked(True)
+        self.selected.emit(key)

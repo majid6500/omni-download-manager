@@ -118,7 +118,7 @@ class ItemActionControllerTests(unittest.TestCase):
         self.assertCountEqual(observed[0][1], [item.id for item in items])
         page.close()
 
-    def test_clicking_selected_card_again_clears_selection_and_bulk_toolbar(self) -> None:
+    def test_clicking_selected_card_again_keeps_it_selected(self) -> None:
         model = DownloadListModel()
         model.set_items([
             DownloadItem(
@@ -149,12 +149,15 @@ class ItemActionControllerTests(unittest.TestCase):
         self.assertTrue(page._view.selectionModel().isSelected(card_index))
         QTest.mouseClick(page._view.viewport(), Qt.MouseButton.LeftButton, pos=click_point)
 
-        self.assertEqual(len(page._view.selectionModel().selectedRows()), 0)
-        self.assertFalse(page._bulk_remove.isVisible())
-        self.assertEqual(page._selection_count.text(), "")
+        # A plain click always lands on the row it is over; only Ctrl/Shift toggle
+        # or extend the selection, so re-clicking keeps the card selected.
+        self.assertEqual(len(page._view.selectionModel().selectedRows()), 1)
+        self.assertTrue(page._view.selectionModel().isSelected(card_index))
+        self.assertTrue(page._bulk_remove.isVisible())
+        self.assertEqual(page._selection_count.text(), "1 selected")
         page.close()
 
-    def test_clicking_another_card_adds_and_deselects_independently(self) -> None:
+    def test_plain_click_replaces_selection_and_ctrl_click_extends_it(self) -> None:
         model = DownloadListModel()
         model.set_items([
             DownloadItem(
@@ -172,18 +175,29 @@ class ItemActionControllerTests(unittest.TestCase):
 
         first = page._proxy.index(0, 0)
         second = page._proxy.index(1, 0)
-        for index in (first, second):
-            rect = page._view.visualRect(index)
-            QTest.mouseClick(
-                page._view.viewport(),
-                Qt.MouseButton.LeftButton,
-                pos=QPoint(rect.left() + 80, rect.center().y()),
-            )
-            QTest.qWait(QApplication.doubleClickInterval() + 50)
+
+        first_rect = page._view.visualRect(first)
+        first_point = QPoint(first_rect.left() + 80, first_rect.center().y())
+        QTest.mouseClick(page._view.viewport(), Qt.MouseButton.LeftButton, pos=first_point)
+        QTest.qWait(QApplication.doubleClickInterval() + 50)
+        self.assertEqual(len(page._view.selectionModel().selectedRows()), 1)
+
+        # Ctrl+click extends the selection, so the bulk toolbar can act on several
+        # downloads at once.
+        second_rect = page._view.visualRect(second)
+        QTest.mouseClick(
+            page._view.viewport(),
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.ControlModifier,
+            pos=QPoint(second_rect.left() + 80, second_rect.center().y()),
+        )
+        QTest.qWait(QApplication.doubleClickInterval() + 50)
 
         self.assertEqual(len(page._view.selectionModel().selectedRows()), 2)
         self.assertTrue(page._bulk_remove.isVisible())
 
+        # A plain click moves the selection to the row it lands on instead of
+        # adding another row to it.
         first_rect = page._view.visualRect(first)
         QTest.mouseClick(
             page._view.viewport(),
@@ -197,7 +211,7 @@ class ItemActionControllerTests(unittest.TestCase):
         remaining = page._view.selectionModel().selectedRows()[0]
         remaining_item = page._view.item_at(remaining)
         self.assertIsNotNone(remaining_item)
-        self.assertNotEqual(remaining_item.id, page._view.item_at(first).id)
+        self.assertEqual(remaining_item.id, page._view.item_at(first).id)
         page.close()
 
 

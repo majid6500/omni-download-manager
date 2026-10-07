@@ -61,7 +61,11 @@ class ItemActionController(QObject):
                 return
 
         if action is ItemAction.PAUSE:
-            targets = [item for item in items if item.is_active and item.resumable is not False]
+            targets = [
+                item for item in items
+                if (item.is_active or item.status is DownloadStatus.QUEUED)
+                and item.resumable is not False
+            ]
             operation = self._manager.pause
         elif action is ItemAction.RESUME:
             startable = {

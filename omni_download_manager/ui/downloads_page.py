@@ -85,6 +85,8 @@ class DownloadsPage(QWidget):
         self._sort.setFixedWidth(150)
 
         self._selection_count = make_label(role="muted")
+        # Cached so progress updates do not rebuild the bulk action state.
+        self._bulk_signature: tuple | None = None
         self._bulk_pause = QPushButton("Pause")
         self._bulk_resume = QPushButton("Resume")
         self._bulk_cancel = QPushButton("Cancel")
@@ -197,10 +199,19 @@ class DownloadsPage(QWidget):
     def _update_bulk_actions(self, *_args) -> None:
         item_ids = self._selected_item_ids()
         selected = bool(item_ids)
-        self._selection_count.setText(f"{len(item_ids)} selected" if selected else "")
         selected_items = [self._view.item_at(index) for index in self._view.selectionModel().selectedRows()]
         selected_items = [item for item in selected_items if item is not None]
-        can_pause = any(item.is_active and item.resumable is not False for item in selected_items)
+        # The buttons depend on which items are selected and their state, never on
+        # progress ticks, so the work is skipped while that has not changed.
+        signature = tuple((item.id, item.status, item.resumable) for item in selected_items)
+        if signature == self._bulk_signature:
+            return
+        self._bulk_signature = signature
+        self._selection_count.setText(f"{len(item_ids)} selected" if selected else "")
+        can_pause = any(
+            (item.is_active or item.status is DownloadStatus.QUEUED) and item.resumable is not False
+            for item in selected_items
+        )
         can_resume = any(item.status in {
             DownloadStatus.PENDING, DownloadStatus.PAUSED, DownloadStatus.FAILED, DownloadStatus.CANCELLED
         } for item in selected_items)

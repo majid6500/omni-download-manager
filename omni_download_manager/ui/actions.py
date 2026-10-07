@@ -41,8 +41,11 @@ def row_buttons(item: DownloadItem) -> list[ActionSpec]:
     stopping = item.stop_reason is not None
     status = item.status
     if status is S.QUEUED:
-        return [_spec(ItemAction.CANCEL, "x", "Cancel", danger=True),
-                _spec(ItemAction.REMOVE, "trash", "Remove", danger=True)]
+        return [
+            _spec(ItemAction.PAUSE, "pause", "Pause", "Take out of the queue"),
+            _spec(ItemAction.CANCEL, "x", "Cancel", danger=True),
+            _spec(ItemAction.REMOVE, "trash", "Remove", danger=True),
+        ]
     if status is S.PENDING:
         if item.scheduled_at is not None:
             return [

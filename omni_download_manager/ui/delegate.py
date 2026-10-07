@@ -231,7 +231,15 @@ class DownloadItemDelegate(QStyledItemDelegate):
 
         fills = item.segment_fill
         if fills and len(fills) >= 2:
-            self._paint_segmented_bar(painter, track, fills, fill_color, palette)
+            self._paint_segmented_bar(
+                painter,
+                track,
+                fills,
+                fill_color,
+                palette,
+                retries=item.segment_retries,
+                stalled=item.segment_stalled,
+            )
         else:
             progress = item.progress or 0.0
             if progress > 0:
@@ -275,6 +283,8 @@ class DownloadItemDelegate(QStyledItemDelegate):
         x = track.left()
         for index, fill in enumerate(fills):
             slot_rect = QRectF(x, track.top(), slot, BAR_HEIGHT)
+            # Reset the pen every slot: the retry badge below changes it.
+            painter.setPen(Qt.PenStyle.NoPen)
             # Background for the slot
             painter.setBrush(QColor(palette.surface_raised))
             painter.drawRoundedRect(slot_rect, 2, 2)

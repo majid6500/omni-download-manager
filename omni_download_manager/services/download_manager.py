@@ -305,6 +305,13 @@ class DownloadManager:
     def pause(self, item_id: str) -> None:
         with self._locked():
             item = self._require(item_id)
+            if item.status is DownloadStatus.QUEUED:
+                # Not running yet: leave the queue without discarding what the item
+                # already downloaded (cancelling it would delete that data).
+                item.transition_to(DownloadStatus.PENDING)
+                self._persist(item)
+                self._record_event(EventKind.UPDATED, item)
+                return
             worker = self._workers.get(item_id)
             if worker is None or not item.is_active:
                 raise InvalidOperationError("Only a running download can be paused.")

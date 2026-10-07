@@ -67,7 +67,6 @@ PALETTES = {palette.name: palette for palette in (DARK, LIGHT)}
 
 _STYLESHEET = Template(
     """
-* { outline: none; }
 QWidget { color: $text; }
 QMainWindow, QDialog, QWidget#Root { background: $bg; }
 QWidget#SettingsPage, QWidget#SettingsContent, QScrollArea#SettingsScroll { background: $bg; }

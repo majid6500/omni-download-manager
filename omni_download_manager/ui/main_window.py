@@ -55,6 +55,7 @@ class MainWindow(QMainWindow):
         # from now on reaches the model, and events that arrive before the snapshot
         # is read are covered by it (the handlers ignore unknown/duplicate ids).
         self._model = DownloadListModel(self)
+        self._counts_signature: tuple | None = None
         self._bridge = ManagerBridge(manager, self)
         self._bridge.item_added.connect(self._model.add_item, Qt.ConnectionType.QueuedConnection)
         self._bridge.item_updated.connect(self._on_item_updated, Qt.ConnectionType.QueuedConnection)
@@ -123,6 +124,11 @@ class MainWindow(QMainWindow):
 
     def _update_counts(self, *_args) -> None:
         items = self._model.items()
+        # Sidebar counts only change when a status changes, not on progress ticks.
+        signature = tuple(item.status for item in items)
+        if signature == self._counts_signature:
+            return
+        self._counts_signature = signature
         self._sidebar.set_counts({v: sum(1 for i in items if v.matches(i)) for v in ViewFilter})
 
     # ------------------------------------------------------------------ add
@@ -143,7 +149,7 @@ class MainWindow(QMainWindow):
             scheduled_at=request.scheduled_at,
         )
         if self._downloads.view_filter is ViewFilter.COMPLETED or self._downloads.view_filter is ViewFilter.FAILED:
-            self._sidebar.selected.emit(ViewFilter.ALL.value)
+            self._sidebar.select(ViewFilter.ALL.value)
 
     # ---------------------------------------------------------------- close
 

@@ -15,7 +15,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QAbstractItemView, QFrame, QListView, QToolTip
 
-from omni_download_manager.core.models import DownloadItem
+from omni_download_manager.core.models import DownloadItem, DownloadStatus
 from omni_download_manager.ui.actions import ActionSpec, ItemAction
 from omni_download_manager.ui.delegate import DownloadItemDelegate
 from omni_download_manager.ui.models import ITEM_ROLE
@@ -79,6 +79,8 @@ class DownloadListView(QListView):
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        # Never carry a swallowed release into the next click.
+        self._selection_click_handled = False
         index, item, spec = self._hit(event.position().toPoint())
         if event.button() == Qt.MouseButton.LeftButton and item and spec and spec.enabled:
             self.setCurrentIndex(index)
@@ -91,11 +93,13 @@ class DownloadListView(QListView):
             and item is not None
             and event.modifiers() == Qt.KeyboardModifier.NoModifier
         ):
+            # A plain click selects the row (and only that row); Ctrl/Shift clicks
+            # fall through to the base class, which toggles/extends the selection.
             self._selection_click_handled = True
             selection = self.selectionModel()
             selection.select(
                 index,
-                QItemSelectionModel.SelectionFlag.Toggle,
+                QItemSelectionModel.SelectionFlag.ClearAndSelect,
             )
             selection.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.NoUpdate)
             event.accept()
@@ -132,7 +136,9 @@ class DownloadListView(QListView):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         _, item, spec = self._hit(event.position().toPoint())
-        if item and not spec:
+        # Opening only makes sense once the file exists; on a running download the
+        # gesture would be a silent no-op.
+        if item and not spec and item.status is DownloadStatus.COMPLETED:
             self.actionRequested.emit(ItemAction.OPEN_FILE.value, item.id)
             return
         super().mouseDoubleClickEvent(event)
@@ -149,7 +155,8 @@ class DownloadListView(QListView):
             self.actionRequested.emit(ItemAction.REMOVE.value, item.id)
             return
         if item is not None and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.actionRequested.emit(ItemAction.OPEN_FILE.value, item.id)
+            if item.status is DownloadStatus.COMPLETED:
+                self.actionRequested.emit(ItemAction.OPEN_FILE.value, item.id)
             return
         super().keyPressEvent(event)
 
