@@ -70,11 +70,17 @@ class DownloadItem:
     created_at: float = field(default_factory=time.time)
     scheduled_at: float | None = None
     completed_at: float | None = None
+    transfer_mode: str | None = None
+    multipart_segments_json: str | None = None
 
     # Transient values: never persisted.
     speed_bps: float = 0.0
     stop_reason: StopReason | None = None
     retry_attempt: int = 0
+    segment_fill: tuple[float, ...] | None = None
+    # Transient UI hints for per-segment retry counts and stalled/backoff state.
+    segment_retries: tuple[int, ...] | None = None
+    segment_stalled: tuple[bool, ...] | None = None
 
     def transition_to(self, new_status: DownloadStatus) -> None:
         if new_status == self.status:

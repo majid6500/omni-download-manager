@@ -49,6 +49,14 @@ from omni_download_manager.engine.base import (
     TransferMetadata,
 )
 from omni_download_manager.engine.filenames import filename_from_url, sanitize_filename
+from omni_download_manager.engine.segments import (
+    decode_multipart_state,
+    encode_multipart_state,
+    has_segment_files,
+    remove_segment_files,
+    segment_fill_from_state,
+    total_downloaded_from_state,
+)
 from omni_download_manager.storage.repository import DownloadRepository
 from omni_download_manager.utils.urls import validate_url
 
@@ -150,8 +158,9 @@ class DownloadManager:
                 elif item.status is DownloadStatus.QUEUED:
                     item.transition_to(DownloadStatus.PENDING)
                 if item.status in (DownloadStatus.PAUSED, DownloadStatus.FAILED):
-                    item.downloaded_bytes = _size_or_zero(item.partial_path)
+                    item.downloaded_bytes = _restored_downloaded_bytes(item)
                 item.speed_bps = 0.0
+                item.segment_fill = None
                 item.stop_reason = None
                 item.retry_attempt = 0
                 self._items[item.id] = item
@@ -284,8 +293,11 @@ class DownloadManager:
                 raise InvalidOperationError("This download can't be cancelled.")
             item.transition_to(DownloadStatus.CANCELLED)
             item.scheduled_at = None
-            _delete_quietly(item.partial_path)
+            _clear_transfer_artifacts(item)
             item.downloaded_bytes = 0
+            item.transfer_mode = None
+            item.multipart_segments_json = None
+            item.segment_fill = None
             item.error_message = None
             self._persist(item)
             self._emit(EventKind.UPDATED, item)
@@ -302,7 +314,7 @@ class DownloadManager:
                 # The worker deletes its own partial file when it sees the cancel request.
                 worker.control.request_stop(StopReason.CANCEL)
             elif item.status is not DownloadStatus.COMPLETED:
-                _delete_quietly(item.partial_path)
+                _clear_transfer_artifacts(item)
             elif delete_file:
                 _delete_quietly(item.file_path)
 
@@ -352,6 +364,8 @@ class DownloadManager:
             connect_timeout=settings.connect_timeout,
             read_timeout=settings.read_timeout,
             use_system_proxy=settings.use_system_proxy,
+            transfer_mode=item.transfer_mode,
+            multipart_resume=decode_multipart_state(item.multipart_segments_json),
         )
         control = DownloadControl()
         thread = threading.Thread(
@@ -423,7 +437,7 @@ class DownloadManager:
             if failure is not None:
                 item.error_message = failure
                 item.transition_to(DownloadStatus.FAILED)
-                item.downloaded_bytes = _size_or_zero(item.partial_path)
+                item.downloaded_bytes = _restored_downloaded_bytes(item)
             elif outcome is not None and outcome.kind is OutcomeKind.COMPLETED:
                 item.transition_to(DownloadStatus.COMPLETED)
                 if outcome.path is not None:
@@ -432,6 +446,9 @@ class DownloadManager:
                 item.total_bytes = outcome.downloaded_bytes
                 item.completed_at = time.time()
                 item.error_message = None
+                item.transfer_mode = None
+                item.multipart_segments_json = None
+                item.segment_fill = None
                 logger.info("Download %s completed: %s", item_id, item.file_path)
             elif outcome is not None and outcome.kind is OutcomeKind.CANCELLED:
                 item.transition_to(DownloadStatus.CANCELLED)
@@ -439,7 +456,7 @@ class DownloadManager:
                 logger.info("Download %s cancelled", item_id)
             else:
                 item.transition_to(DownloadStatus.PAUSED)
-                item.downloaded_bytes = _size_or_zero(item.partial_path)
+                item.downloaded_bytes = _restored_downloaded_bytes(item)
                 logger.info("Download %s paused at %d bytes", item_id, item.downloaded_bytes)
 
             self._persist(item)
@@ -518,6 +535,13 @@ class DownloadManager:
             item.etag = metadata.etag
             item.last_modified = metadata.last_modified
             item.downloaded_bytes = metadata.resumed_from
+            item.transfer_mode = metadata.transfer_mode
+            if metadata.multipart_state is not None:
+                item.multipart_segments_json = encode_multipart_state(metadata.multipart_state)
+                item.segment_fill = segment_fill_from_state(metadata.multipart_state)
+            elif metadata.transfer_mode == "single":
+                item.multipart_segments_json = None
+                item.segment_fill = None
             if item.status is DownloadStatus.CONNECTING:
                 item.transition_to(DownloadStatus.DOWNLOADING)
             item.retry_attempt = 0
@@ -534,6 +558,12 @@ class DownloadManager:
             if snapshot.total_bytes is not None:
                 item.total_bytes = snapshot.total_bytes
             item.speed_bps = snapshot.speed_bps
+            item.segment_fill = snapshot.segment_fill
+            # Per-segment UI hints
+            item.segment_retries = snapshot.segment_retries
+            item.segment_stalled = snapshot.segment_stalled
+            if snapshot.multipart_state is not None:
+                item.multipart_segments_json = encode_multipart_state(snapshot.multipart_state)
             now = time.monotonic()
             if now - self._last_persisted.get(item_id, 0.0) >= self._persist_interval:
                 self._persist(item)
@@ -586,6 +616,24 @@ def _size_or_zero(path: Path) -> int:
         return path.stat().st_size
     except OSError:
         return 0
+
+
+def _restored_downloaded_bytes(item: DownloadItem) -> int:
+    if item.transfer_mode == "multipart":
+        state = decode_multipart_state(item.multipart_segments_json)
+        if state is not None:
+            return total_downloaded_from_state(state)
+        if item.filename_resolved and has_segment_files(Path(item.directory), item.filename):
+            state = decode_multipart_state(item.multipart_segments_json)
+            if state is not None:
+                return total_downloaded_from_state(state)
+    return _size_or_zero(item.partial_path)
+
+
+def _clear_transfer_artifacts(item: DownloadItem) -> None:
+    _delete_quietly(item.partial_path)
+    if item.filename_resolved:
+        remove_segment_files(Path(item.directory), item.filename)
 
 
 def _delete_quietly(path: Path) -> None:

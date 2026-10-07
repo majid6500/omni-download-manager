@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
 PAYLOAD = random.Random(1234).randbytes(1_500_000)
-SLOW_PAYLOAD = random.Random(99).randbytes(600_000)
+SLOW_PAYLOAD = random.Random(99).randbytes(2_000_000)
 ETAG = '"payload-v1"'
 
 
@@ -98,12 +98,14 @@ class _Handler(BaseHTTPRequestHandler):
         extra: dict[str, str] | None = None,
     ) -> None:
         start, status = 0, 200
+        end = len(data) - 1
         range_header = self.headers.get("Range")
         if_range = self.headers.get("If-Range")
         if ranges and range_header and (if_range is None or if_range == etag):
-            match = re.match(r"bytes=(\d+)-", range_header)
+            match = re.match(r"bytes=(\d+)-(\d*)", range_header)
             if match:
                 start = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else end
                 if start >= len(data):
                     self.send_response(416)
                     self.send_header("Content-Range", f"bytes */{len(data)}")
@@ -112,7 +114,7 @@ class _Handler(BaseHTTPRequestHandler):
                     return
                 status = 206
 
-        body = data[start:]
+        body = data[start : end + 1]
         self.send_response(status)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
@@ -120,7 +122,7 @@ class _Handler(BaseHTTPRequestHandler):
         if ranges:
             self.send_header("Accept-Ranges", "bytes")
         if status == 206:
-            self.send_header("Content-Range", f"bytes {start}-{len(data) - 1}/{len(data)}")
+            self.send_header("Content-Range", f"bytes {start}-{end}/{len(data)}")
         for key, value in (extra or {}).items():
             if key != "Content-Type":
                 self.send_header(key, value)

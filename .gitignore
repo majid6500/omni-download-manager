@@ -1,8 +1,20 @@
+# Python bytecode / virtual environments
 __pycache__/
 *.pyc
 .venv/
+
+# Packaging and build output (PyInstaller, Inno Setup)
 build/
 dist/
+installer/
 *.egg-info/
 *.spec.bak
+*.exe
+*.msi
+
+# Installer / packaging temp files
+*.tmp
+*.log
+
+# IDE
 .idea/

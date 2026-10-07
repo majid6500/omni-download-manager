@@ -44,6 +44,10 @@ MIGRATIONS: tuple[str, ...] = (
     """
     ALTER TABLE downloads ADD COLUMN scheduled_at REAL;
     """,
+    """
+    ALTER TABLE downloads ADD COLUMN transfer_mode TEXT;
+    ALTER TABLE downloads ADD COLUMN multipart_segments_json TEXT;
+    """,
 )
 
 
@@ -105,8 +109,9 @@ class SqliteDownloadRepository:
                     INSERT INTO downloads (
                         id, url, directory, filename, filename_resolved, status, total_bytes,
                         downloaded_bytes, resumable, etag, last_modified, error_message,
-                        created_at, scheduled_at, completed_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        created_at, scheduled_at, completed_at, transfer_mode,
+                        multipart_segments_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         url=excluded.url, directory=excluded.directory,
                         filename=excluded.filename,
@@ -117,7 +122,9 @@ class SqliteDownloadRepository:
                         last_modified=excluded.last_modified,
                         error_message=excluded.error_message,
                         scheduled_at=excluded.scheduled_at,
-                        completed_at=excluded.completed_at
+                        completed_at=excluded.completed_at,
+                        transfer_mode=excluded.transfer_mode,
+                        multipart_segments_json=excluded.multipart_segments_json
                     """,
                     (
                         item.id,
@@ -135,6 +142,8 @@ class SqliteDownloadRepository:
                         item.created_at,
                         item.scheduled_at,
                         item.completed_at,
+                        item.transfer_mode,
+                        item.multipart_segments_json,
                     ),
                 )
         except sqlite3.Error as exc:
@@ -184,4 +193,6 @@ def _row_to_item(row: sqlite3.Row) -> DownloadItem:
         created_at=row["created_at"],
         scheduled_at=row["scheduled_at"],
         completed_at=row["completed_at"],
+        transfer_mode=row["transfer_mode"],
+        multipart_segments_json=row["multipart_segments_json"],
     )

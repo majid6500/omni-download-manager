@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication
 from omni_download_manager.config.paths import resolve_app_paths
 from omni_download_manager.config.settings import SettingsStore
 from omni_download_manager.constants import APP_NAME, VERSION
-from omni_download_manager.engine.http_downloader import HttpDownloader
+from omni_download_manager.engine.adaptive_http_downloader import AdaptiveHttpDownloader
 from omni_download_manager.services.download_manager import DownloadManager
 from omni_download_manager.storage.repository import open_repository
 from omni_download_manager.ui.icons import logo_icon
@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         show_information(theme, None, APP_NAME, f"{APP_NAME} is already running.")
         return 0
 
-    downloader = HttpDownloader()
+    downloader = AdaptiveHttpDownloader()
     downloader.set_speed_limit_mib(settings.get().max_download_speed_mib)
     settings.subscribe(
         lambda current: downloader.set_speed_limit_mib(current.max_download_speed_mib)

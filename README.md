@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable Windows Build</b> · <b>106 Tests Passing</b>
+  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable Windows Build</b> · <b>114 Tests Passing</b>
 </p>
 
 ---
@@ -23,7 +23,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 
 | | Capability | | Capability |
 |---|---|---|---|
-| ⚡ | HTTP/HTTPS downloads | 📋 | FIFO queue |
+| ⚡ | HTTP/HTTPS downloads | 🔗 | Adaptive multi-connection downloads |
 | ⏯️ | Pause & resume | 🔁 | Automatic retry |
 | 🚀 | Up to 5 active downloads | 🐢 | Global speed limit |
 | 🗓️ | One-time scheduling | 🔎 | Search & sorting |
@@ -35,7 +35,9 @@ The project is designed as a modular foundation that can grow into a more capabl
 
 - HTTP and HTTPS downloads.
 - Streaming downloads directly to disk instead of loading the complete file into memory.
+- Automatically uses up to **4 HTTP Range connections** for eligible files when the server returns valid partial responses; otherwise it falls back to a normal download.
 - Progress percentage, downloaded/total size, speed, and estimated remaining time when the total size is known.
+- Multi-part progress is aggregated from actual bytes and its segment state is persisted for safe resume after pausing or restarting.
 - Pause/resume through HTTP `Range` when supported by the server.
 - Incomplete downloads are kept as `.part` files so they can be resumed.
 - Manual retry plus up to **3 automatic retries** for transient failures, with increasing delays.
@@ -157,7 +159,7 @@ Run the complete test suite with:
 python -m unittest discover -s tests -t .
 ```
 
-The current verified suite contains **106 passing tests**. Coverage includes download behavior, queue scheduling, pause/cancel/resume, retries, shared speed limiting, scheduled starts, restart recovery, category filtering, system-proxy configuration, search/sorting, bulk actions, persistence, completion notifications, and icon loading.
+The current verified suite contains **114 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, category filtering, system-proxy configuration, search/sorting, bulk actions, persistence, completion notifications, and icon loading.
 
 Download-related tests use a **local HTTP server**, so they do not depend on an external download service.
 
@@ -177,13 +179,13 @@ Download-related tests use a **local HTTP server**, so they do not depend on an 
 └───────┬───────────────┬───────┘
         │               │
         ▼               ▼
-┌──────────────┐  ┌──────────────┐
-│ HTTP Engine  │  │   SQLite     │
-│ downloader   │  │ repository   │
-└──────┬───────┘  └──────────────┘
-       │
-       ▼
-     Files
+┌─────────────────────────┐  ┌──────────────┐
+│ Adaptive HTTP Engine    │  │   SQLite     │
+│ single / multi-part     │  │ repository   │
+└────────────┬────────────┘  └──────────────┘
+             │
+             ▼
+           Files
 ```
 
 Main project areas:
@@ -191,7 +193,7 @@ Main project areas:
 ```text
 omni_download_manager/
 ├── core/        Domain models, states, errors and file categories
-├── engine/      HTTP download engine, speed meter and filename handling
+├── engine/      Adaptive HTTP download strategies, segments, speed and filenames
 ├── storage/     SQLite repository and migrations
 ├── config/      Paths and application settings
 ├── services/    Queue, scheduling, retries, workers and orchestration
@@ -251,7 +253,6 @@ The project is intentionally focused on its current core feature set. The follow
 - FTP downloads.
 - BitTorrent support.
 - Browser integration for automatically capturing download links.
-- Multi-connection / segmented downloads.
 - Account login, cookies, or configurable custom request headers.
 - A dedicated manual-proxy configuration interface; the current option uses the system proxy.
 - Traditional installer/setup packaging.
@@ -293,7 +294,9 @@ describing the project as open source or redistributing it.
 ## ✨ امکانات اصلی
 
 - دانلود فایل از لینک‌های `HTTP` و `HTTPS`.
+- دانلود چنداتصالی خودکار تا **۴ اتصال** برای فایل‌های مناسب و سرورهای دارای پاسخ معتبر `Range`؛ در غیر این صورت ادامه با دانلود معمولی.
 - دانلود جریانی و کم‌مصرف از نظر حافظه.
+- محاسبهٔ پیشرفت چندبخشی بر اساس مجموع بایت‌ها و نگهداری وضعیت بخش‌ها برای ادامهٔ امن پس از مکث یا اجرای دوباره.
 - نمایش درصد پیشرفت، حجم، سرعت و زمان باقی‌مانده در صورت مشخص بودن حجم فایل.
 - مکث و ادامهٔ دانلود در صورت پشتیبانی سرور از HTTP `Range`.
 - نگهداری فایل‌های ناقص با پسوند `.part`.
@@ -361,7 +364,7 @@ Omni Download Manager.exe
 python -m unittest discover -s tests -t .
 ```
 
-در آخرین اجرای تأییدشده، **هر ۱۰۶ تست با موفقیت پاس شده‌اند**. تست‌ها بخش‌های مختلف موتور دانلود، صف، retry، زمان‌بندی، بازیابی، فیلتر، جست‌وجو، ذخیره‌سازی و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
+در آخرین اجرای تأییدشده، **هر ۱۱۴ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، فیلتر، جست‌وجو، ذخیره‌سازی و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
 
 تست‌های دانلود از یک HTTP server محلی استفاده می‌کنند و به سرویس دانلود خارجی وابسته نیستند.
 
@@ -370,7 +373,7 @@ python -m unittest discover -s tests -t .
 پروژه به بخش‌های مستقلی تقسیم شده است:
 
 - `core` — مدل‌ها، وضعیت‌ها، خطاها و دسته‌بندی فایل‌ها.
-- `engine` — موتور HTTP، اندازه‌گیری سرعت و مدیریت نام فایل.
+- `engine` — راهبردهای تطبیقی دانلود HTTP تک‌اتصالی/چندبخشی، segmentها، اندازه‌گیری سرعت و مدیریت نام فایل.
 - `storage` — SQLite و migrationها.
 - `config` — مسیرها و تنظیمات.
 - `services` — صف، زمان‌بندی، retry، workerها و هماهنگی دانلودها.
@@ -422,7 +425,6 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 - دانلود FTP.
 - پشتیبانی از BitTorrent.
 - اتصال مستقیم به مرورگر برای دریافت خودکار لینک دانلود.
-- دانلود چنداتصالی یا Segmented.
 - ورود به حساب، Cookie و Header سفارشی قابل تنظیم.
 - رابط مستقل برای تنظیم دستی Proxy.
 - نصب‌کنندهٔ سنتی Setup/Installer.

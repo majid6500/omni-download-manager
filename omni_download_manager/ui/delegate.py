@@ -229,10 +229,16 @@ class DownloadItemDelegate(QStyledItemDelegate):
             painter.restore()
             return
 
-        progress = item.progress or 0.0
-        if progress > 0:
-            width = max(BAR_HEIGHT, track.width() * progress)
-            painter.drawRoundedRect(QRectF(track.left(), track.top(), width, BAR_HEIGHT), BAR_HEIGHT / 2, BAR_HEIGHT / 2)
+        fills = item.segment_fill
+        if fills and len(fills) >= 2:
+            self._paint_segmented_bar(painter, track, fills, fill_color, palette)
+        else:
+            progress = item.progress or 0.0
+            if progress > 0:
+                width = max(BAR_HEIGHT, track.width() * progress)
+                painter.drawRoundedRect(
+                    QRectF(track.left(), track.top(), width, BAR_HEIGHT), BAR_HEIGHT / 2, BAR_HEIGHT / 2
+                )
 
         font = QFont(base_font)
         font.setPointSizeF(max(8.0, base_font.pointSizeF() - 0.5))
@@ -245,6 +251,72 @@ class DownloadItemDelegate(QStyledItemDelegate):
             QPointF(rect.right() - metrics.horizontalAdvance(label), rect.center().y() + (metrics.ascent() - metrics.descent()) / 2),
             label,
         )
+
+    def _paint_segmented_bar(
+        self,
+        painter: QPainter,
+        track: QRectF,
+        fills: tuple[float, ...],
+        fill_color: QColor,
+        palette: Palette,
+        retries: tuple[int, ...] | None = None,
+        stalled: tuple[bool, ...] | None = None,
+    ) -> None:
+        """Paint a segmented progress bar where each slot represents one download segment.
+
+        The visual indicates per-segment fill fraction and optional status hints:
+        - stalled segments are drawn in the danger color
+        - segments with retry attempts are drawn in the warning color and show a small retry count
+        """
+        count = len(fills)
+        gap = 1.0
+        total_gap = gap * (count - 1)
+        slot = max(1.0, (track.width() - total_gap) / count)
+        x = track.left()
+        for index, fill in enumerate(fills):
+            slot_rect = QRectF(x, track.top(), slot, BAR_HEIGHT)
+            # Background for the slot
+            painter.setBrush(QColor(palette.surface_raised))
+            painter.drawRoundedRect(slot_rect, 2, 2)
+
+            if fill > 0:
+                inner_w = max(1.0, slot * min(1.0, fill))
+                # Choose color according to status hints: stalled > retry > normal
+                seg_color = fill_color
+                if stalled and index < len(stalled) and stalled[index]:
+                    seg_color = QColor(palette.danger)
+                elif retries and index < len(retries) and retries[index] > 0:
+                    seg_color = QColor(palette.warning)
+                painter.setBrush(seg_color)
+                painter.drawRoundedRect(
+                    QRectF(slot_rect.left(), slot_rect.top(), inner_w, BAR_HEIGHT), 2, 2
+                )
+
+                # If there are retry attempts, draw a small count overlay if there's space
+                retry_count = (retries[index] if (retries and index < len(retries)) else 0)
+                if retry_count:
+                    # Small badge at the right of the segment slot
+                    badge_w = min(18.0, slot * 0.35)
+                    badge_h = max(10.0, BAR_HEIGHT - 2)
+                    bx = slot_rect.right() - badge_w - 2
+                    by = slot_rect.top() + (BAR_HEIGHT - badge_h) / 2
+                    badge_rect = QRectF(bx, by, badge_w, badge_h)
+                    painter.setBrush(QColor(palette.surface_raised))
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.drawRoundedRect(badge_rect, 2, 2)
+                    # small number
+                    font = QFont(painter.font())
+                    font.setPointSizeF(max(6.0, painter.font().pointSizeF() - 2))
+                    painter.setFont(font)
+                    painter.setPen(QColor(palette.warning))
+                    metrics = QFontMetrics(font)
+                    label = str(retry_count)
+                    painter.drawText(
+                        QPointF(badge_rect.center().x() - metrics.horizontalAdvance(label) / 2,
+                                badge_rect.center().y() + (metrics.ascent() - metrics.descent()) / 2),
+                        label,
+                    )
+            x += slot + gap
 
     def _paint_button(self, painter, item: DownloadItem, spec: ActionSpec, rect: QRectF, palette: Palette) -> None:
         key = (item.id, spec.action)

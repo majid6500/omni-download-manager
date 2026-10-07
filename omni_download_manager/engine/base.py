@@ -10,9 +10,12 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from omni_download_manager.core.models import StopReason
+
+if TYPE_CHECKING:
+    from omni_download_manager.engine.segments import MultiPartResumeState
 
 
 class DownloadControl:
@@ -61,6 +64,9 @@ class DownloadJob:
     connect_timeout: float = 15.0
     read_timeout: float = 30.0
     use_system_proxy: bool = True
+    # ``single`` / ``multipart`` when resuming; ``None`` lets the engine probe on a fresh start.
+    transfer_mode: str | None = None
+    multipart_resume: MultiPartResumeState | None = None
 
 
 @dataclass(frozen=True)
@@ -73,6 +79,8 @@ class TransferMetadata:
     etag: str | None
     last_modified: str | None
     resumed_from: int = 0
+    transfer_mode: str = "single"
+    multipart_state: MultiPartResumeState | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +88,11 @@ class ProgressSnapshot:
     downloaded_bytes: int
     total_bytes: int | None
     speed_bps: float
+    segment_fill: tuple[float, ...] | None = None
+    multipart_state: MultiPartResumeState | None = None
+    # Per-segment UI hints: retry counts and whether the segment is currently stalled/backing off.
+    segment_retries: tuple[int, ...] | None = None
+    segment_stalled: tuple[bool, ...] | None = None
 
 
 class OutcomeKind(str, Enum):
