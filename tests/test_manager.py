@@ -1,4 +1,5 @@
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -15,6 +16,7 @@ from omni_download_manager.core.errors import (
 )
 from omni_download_manager.core.events import EventKind
 from omni_download_manager.core.models import DownloadItem, DownloadStatus
+from omni_download_manager.engine.base import DownloadOutcome, OutcomeKind
 from omni_download_manager.engine.http_downloader import HttpDownloader
 from omni_download_manager.services.download_manager import DownloadManager
 from omni_download_manager.storage.repository import SqliteDownloadRepository
@@ -403,6 +405,73 @@ class ManagerTests(unittest.TestCase):
             self.assertEqual(item.downloaded_bytes, 0)  # no .part on disk
         finally:
             manager.shutdown(timeout=1)
+
+
+    def test_listeners_run_after_the_manager_lock_is_released(self) -> None:
+        """A listener must be able to hand the lock to another thread."""
+
+        def lock_from_other_thread() -> bool:
+            acquired = self.manager._lock.acquire(timeout=2.0)
+            if acquired:
+                self.manager._lock.release()
+            return acquired
+
+        results: list[bool] = []
+
+        def listener(event) -> None:
+            probe = threading.Thread(target=lambda: results.append(lock_from_other_thread()))
+            probe.start()
+            probe.join(timeout=3)
+            if not results:
+                results.append(False)
+
+        self.manager.subscribe(listener)
+        self.manager.add(self.server.url("/file.bin"), self.dest, start=False)
+
+        self.assertTrue(results, "the listener was never called")
+        self.assertTrue(
+            all(results), "a listener ran while the manager lock was still held"
+        )
+
+    def test_queue_keeps_moving_when_recording_a_result_fails(self) -> None:
+        """A broken _finish must still free the slot and start queued downloads."""
+
+        class Blocking:
+            def __init__(self) -> None:
+                self.released = threading.Event()
+
+            def download(self, job, control, observer):
+                self.released.wait(timeout=10)
+                return DownloadOutcome(
+                    OutcomeKind.COMPLETED, job.directory / job.filename, 0, 0
+                )
+
+        engine = Blocking()
+        self.manager.shutdown(timeout=3)
+        self.manager = self.make_manager(engine)
+        try:
+            ids = [
+                self.manager.add(self.server.url("/file.bin"), self.dest, start=True).id
+                for _ in range(MAX_CONCURRENT_DOWNLOADS + 1)
+            ]
+            queued_id = ids[-1]
+            self.assertTrue(
+                wait_for(lambda: self.status(queued_id) is S.QUEUED, 5),
+                f"expected a queued download, got {self.status(queued_id)}",
+            )
+            self.assertEqual(self.manager.active_count(), MAX_CONCURRENT_DOWNLOADS)
+
+            def broken_finish(*args, **kwargs):
+                raise RuntimeError("recording the result failed")
+
+            with patch.object(DownloadManager, "_finish", broken_finish):
+                engine.released.set()
+                self.assertTrue(
+                    wait_for(lambda: self.status(queued_id) is not S.QUEUED, 10),
+                    "the queued download never started",
+                )
+        finally:
+            engine.released.set()
 
 
 if __name__ == "__main__":

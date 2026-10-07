@@ -21,6 +21,7 @@ import math
 import os
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -52,8 +53,9 @@ from omni_download_manager.engine.filenames import filename_from_url, sanitize_f
 from omni_download_manager.engine.segments import (
     decode_multipart_state,
     encode_multipart_state,
-    has_segment_files,
+    list_segment_files,
     remove_segment_files,
+    segment_downloaded_bytes,
     segment_fill_from_state,
     total_downloaded_from_state,
 )
@@ -97,6 +99,9 @@ class DownloadManager:
         self._persist_interval = persist_interval
 
         self._lock = threading.RLock()
+        # Per-thread nesting depth of _locked(); only the outermost block publishes.
+        self._local = threading.local()
+        self._pending: list[DownloadEvent] = []
         self._items: dict[str, DownloadItem] = {}
         self._workers: dict[str, _Worker] = {}
         self._listeners: list[Listener] = []
@@ -113,45 +118,79 @@ class DownloadManager:
     # ------------------------------------------------------------ subscription
 
     def subscribe(self, listener: Listener) -> Callable[[], None]:
-        with self._lock:
+        with self._locked():
             self._listeners.append(listener)
 
         def unsubscribe() -> None:
-            with self._lock:
+            with self._locked():
                 if listener in self._listeners:
                     self._listeners.remove(listener)
 
         return unsubscribe
 
-    def _emit(self, kind: EventKind, item: DownloadItem) -> None:
-        event = DownloadEvent(kind, dataclasses.replace(item))
-        for listener in list(self._listeners):
-            try:
-                listener(event)
-            except Exception:
-                logger.exception("Download event listener failed")
+    @contextmanager
+    def _locked(self):
+        """Context manager: hold the manager lock, then publish what it produced.
+
+        Every state change that must notify subscribers runs inside this block.
+        Listeners are only called after the lock has been released (see
+        :meth:`_dispatch_events`), so a slow listener can never block another
+        thread's state change and a listener that calls back into the manager
+        cannot deadlock against it. Nesting is supported: only the outermost block
+        publishes, which keeps the events in recording order.
+        """
+        depth = getattr(self._local, "depth", 0)
+        try:
+            with self._lock:
+                self._local.depth = depth + 1
+                try:
+                    yield
+                finally:
+                    self._local.depth = depth
+        finally:
+            if getattr(self._local, "depth", 0) == 0:
+                self._dispatch_events()
+
+    def _record_event(self, kind: EventKind, item: DownloadItem) -> None:
+        """Snapshot an event for later publication. The caller must hold the lock."""
+        self._pending.append(DownloadEvent(kind, dataclasses.replace(item)))
+
+    def _dispatch_events(self) -> None:
+        """Publish recorded events to the listeners without holding any lock."""
+        while True:
+            with self._lock:
+                if not self._pending:
+                    return
+                events, self._pending = self._pending, []
+                listeners = list(self._listeners)
+            for event in events:
+                for listener in listeners:
+                    try:
+                        listener(event)
+                    except Exception:
+                        logger.exception("Download event listener failed")
 
     # ----------------------------------------------------------------- queries
 
     def list_items(self) -> list[DownloadItem]:
         """Snapshots of all downloads, newest first."""
-        with self._lock:
+        with self._locked():
             items = sorted(self._items.values(), key=lambda i: i.created_at, reverse=True)
             return [dataclasses.replace(i) for i in items]
 
     def get_item(self, item_id: str) -> DownloadItem:
-        with self._lock:
+        with self._locked():
             return dataclasses.replace(self._require(item_id))
 
     def active_count(self) -> int:
-        with self._lock:
+        with self._locked():
             return len(self._workers)
 
     # -------------------------------------------------------------- life cycle
 
     def load(self) -> None:
         """Load saved downloads. Transfers interrupted by a crash or exit become paused."""
-        with self._lock:
+        with self._locked():
             for item in self._repository.load_all():
                 if item.status in ACTIVE_STATUSES:
                     item.transition_to(DownloadStatus.PAUSED)
@@ -168,7 +207,7 @@ class DownloadManager:
 
     def shutdown(self, timeout: float = 8.0) -> None:
         """Pause every running transfer, wait briefly for the workers, then save and close."""
-        with self._lock:
+        with self._locked():
             self._shutting_down = True
             self._scheduler_stop.set()
             workers = dict(self._workers)
@@ -179,7 +218,7 @@ class DownloadManager:
         for worker in workers.values():
             worker.thread.join(max(0.0, deadline - time.monotonic()))
 
-        with self._lock:
+        with self._locked():
             for item_id, worker in self._workers.items():
                 if worker.thread.is_alive():
                     logger.warning("Worker for %s did not stop in time", item_id)
@@ -225,10 +264,10 @@ class DownloadManager:
             filename_resolved=custom_name is not None,
             scheduled_at=scheduled_at,
         )
-        with self._lock:
+        with self._locked():
             self._items[item.id] = item
             self._persist(item)
-            self._emit(EventKind.ADDED, item)
+            self._record_event(EventKind.ADDED, item)
         logger.info("Added download %s: %s", item.id, clean_url)
 
         if start:
@@ -237,7 +276,7 @@ class DownloadManager:
 
     def start(self, item_id: str) -> None:
         """Start, resume or retry a download (the same operation from the engine's view)."""
-        with self._lock:
+        with self._locked():
             item = self._require(item_id)
             if item_id in self._workers:
                 logger.debug("Start ignored for %s: already running", item_id)
@@ -261,10 +300,10 @@ class DownloadManager:
             item.transition_to(DownloadStatus.CONNECTING)
             self._launch(item)
         self._persist(item)
-        self._emit(EventKind.UPDATED, item)
+        self._record_event(EventKind.UPDATED, item)
 
     def pause(self, item_id: str) -> None:
-        with self._lock:
+        with self._locked():
             item = self._require(item_id)
             worker = self._workers.get(item_id)
             if worker is None or not item.is_active:
@@ -277,17 +316,17 @@ class DownloadManager:
             worker.control.request_stop(StopReason.PAUSE)
             if item.stop_reason is not StopReason.CANCEL:
                 item.stop_reason = StopReason.PAUSE
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     def cancel(self, item_id: str) -> None:
         """Stop the download and discard what was downloaded so far."""
-        with self._lock:
+        with self._locked():
             item = self._require(item_id)
             worker = self._workers.get(item_id)
             if worker is not None:
                 worker.control.request_stop(StopReason.CANCEL)
                 item.stop_reason = StopReason.CANCEL
-                self._emit(EventKind.UPDATED, item)
+                self._record_event(EventKind.UPDATED, item)
                 return
             if item.status in (DownloadStatus.COMPLETED, DownloadStatus.CANCELLED):
                 raise InvalidOperationError("This download can't be cancelled.")
@@ -300,14 +339,14 @@ class DownloadManager:
             item.segment_fill = None
             item.error_message = None
             self._persist(item)
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     def remove(self, item_id: str, *, delete_file: bool = False) -> None:
         """Remove from the list. Unfinished data is always discarded.
 
         ``delete_file`` additionally deletes the finished file from disk.
         """
-        with self._lock:
+        with self._locked():
             item = self._require(item_id)
             worker = self._workers.get(item_id)
             if worker is not None:
@@ -324,7 +363,7 @@ class DownloadManager:
                 self._repository.delete(item_id)
             except PersistenceError:
                 logger.exception("Could not delete download %s from the database", item_id)
-            self._emit(EventKind.REMOVED, item)
+            self._record_event(EventKind.REMOVED, item)
         logger.info("Removed download %s", item_id)
 
     # ----------------------------------------------------------------- workers
@@ -335,7 +374,7 @@ class DownloadManager:
 
     def _start_due_scheduled(self) -> None:
         now = time.time()
-        with self._lock:
+        with self._locked():
             if self._shutting_down:
                 return
             due_items = sorted(
@@ -409,8 +448,19 @@ class DownloadManager:
             self._finish(item_id, control, outcome, failure)
         except Exception:
             logger.exception("Could not record the result of download %s", item_id)
-            with self._lock:
+            # Whatever went wrong, the slot must be released and the queue kept
+            # moving, and the item must never be left looking like it still runs.
+            with self._locked():
                 self._workers.pop(item_id, None)
+                item = self._items.get(item_id)
+                if item is not None and item.status in ACTIVE_STATUSES:
+                    item.transition_to(DownloadStatus.PAUSED)
+                    self._persist(item)
+                    self._record_event(EventKind.UPDATED, item)
+                try:
+                    self._start_queued()
+                except Exception:
+                    logger.exception("Could not continue the queue for %s", item_id)
 
     def _finish(
         self,
@@ -419,7 +469,7 @@ class DownloadManager:
         outcome: DownloadOutcome | None,
         failure: str | None,
     ) -> None:
-        with self._lock:
+        with self._locked():
             self._workers.pop(item_id, None)
             item = self._items.get(item_id)
             if item is None:  # removed while running
@@ -460,7 +510,7 @@ class DownloadManager:
                 logger.info("Download %s paused at %d bytes", item_id, item.downloaded_bytes)
 
             self._persist(item)
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
             self._start_queued()
 
     def _start_queued(self) -> None:
@@ -475,16 +525,25 @@ class DownloadManager:
             if not queued:
                 return
             item = min(queued, key=lambda candidate: candidate.created_at)
-            item.transition_to(DownloadStatus.CONNECTING)
-            item.error_message = None
-            item.speed_bps = 0.0
-            item.stop_reason = None
-            self._launch(item)
+            try:
+                item.transition_to(DownloadStatus.CONNECTING)
+                item.error_message = None
+                item.speed_bps = 0.0
+                item.stop_reason = None
+                self._launch(item)
+            except Exception:
+                # Roll back instead of leaving a half-started item or blocking the
+                # loop; the queue is retried on the next completion.
+                logger.exception("Could not start queued download %s", item.id)
+                self._workers.pop(item.id, None)
+                if item.status is DownloadStatus.CONNECTING:
+                    item.transition_to(DownloadStatus.QUEUED)
+                break
             self._persist(item)
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     def _on_retry(self, item_id: str, attempt: int, message: str, delay: float) -> None:
-        with self._lock:
+        with self._locked():
             item = self._items.get(item_id)
             if item is None:
                 return
@@ -493,12 +552,12 @@ class DownloadManager:
             item.retry_attempt = attempt
             item.error_message = f"{message} Retrying in {delay:g} s."
             item.speed_bps = 0.0
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     def _stopped_during_backoff(
         self, item_id: str, job: DownloadJob, control: DownloadControl
     ) -> DownloadOutcome:
-        with self._lock:
+        with self._locked():
             item = self._items.get(item_id)
             item = dataclasses.replace(item) if item is not None else None
         partial_path = item.partial_path if item is not None else job.directory / f"{job.filename}.part"
@@ -509,7 +568,7 @@ class DownloadManager:
         return DownloadOutcome(OutcomeKind.PAUSED, partial_path, downloaded, None)
 
     def _refresh_job(self, item_id: str, job: DownloadJob) -> DownloadJob:
-        with self._lock:
+        with self._locked():
             item = self._items.get(item_id)
             if item is None:
                 return job
@@ -524,7 +583,7 @@ class DownloadManager:
     # Called from worker threads through _Observer.
 
     def _on_metadata(self, item_id: str, metadata: TransferMetadata) -> None:
-        with self._lock:
+        with self._locked():
             item = self._items.get(item_id)
             if item is None:
                 return
@@ -547,10 +606,10 @@ class DownloadManager:
             item.retry_attempt = 0
             item.error_message = None
             self._persist(item)
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     def _on_progress(self, item_id: str, snapshot: ProgressSnapshot) -> None:
-        with self._lock:
+        with self._locked():
             item = self._items.get(item_id)
             if item is None or item.status is not DownloadStatus.DOWNLOADING:
                 return
@@ -567,7 +626,7 @@ class DownloadManager:
             now = time.monotonic()
             if now - self._last_persisted.get(item_id, 0.0) >= self._persist_interval:
                 self._persist(item)
-            self._emit(EventKind.UPDATED, item)
+            self._record_event(EventKind.UPDATED, item)
 
     # ----------------------------------------------------------------- helpers
 
@@ -619,14 +678,20 @@ def _size_or_zero(path: Path) -> int:
 
 
 def _restored_downloaded_bytes(item: DownloadItem) -> int:
+    """Bytes already on disk for an item that is not running.
+
+    For a multi-part transfer the persisted segment state is authoritative; when it
+    is missing (old record, unreadable JSON) the segment files themselves are
+    measured instead of reporting zero. Otherwise the ``.part`` file is used.
+    """
     if item.transfer_mode == "multipart":
         state = decode_multipart_state(item.multipart_segments_json)
         if state is not None:
             return total_downloaded_from_state(state)
-        if item.filename_resolved and has_segment_files(Path(item.directory), item.filename):
-            state = decode_multipart_state(item.multipart_segments_json)
-            if state is not None:
-                return total_downloaded_from_state(state)
+        if item.filename_resolved:
+            segment_files = list_segment_files(Path(item.directory), item.filename)
+            if segment_files:
+                return sum(segment_downloaded_bytes(path) for path in segment_files)
     return _size_or_zero(item.partial_path)
 
 

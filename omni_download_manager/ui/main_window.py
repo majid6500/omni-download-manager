@@ -51,12 +51,15 @@ class MainWindow(QMainWindow):
         self.resize(1160, 740)
         self._restore_geometry()
 
+        # Subscribe and connect before taking the snapshot: every event published
+        # from now on reaches the model, and events that arrive before the snapshot
+        # is read are covered by it (the handlers ignore unknown/duplicate ids).
         self._model = DownloadListModel(self)
-        self._model.set_items(manager.list_items())
         self._bridge = ManagerBridge(manager, self)
         self._bridge.item_added.connect(self._model.add_item, Qt.ConnectionType.QueuedConnection)
         self._bridge.item_updated.connect(self._on_item_updated, Qt.ConnectionType.QueuedConnection)
         self._bridge.item_removed.connect(self._model.remove_item, Qt.ConnectionType.QueuedConnection)
+        self._model.set_items(manager.list_items())
 
         self._controller = ItemActionController(manager, settings, theme, lambda: self)
 
