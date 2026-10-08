@@ -67,6 +67,11 @@ class DownloadJob:
     # ``single`` / ``multipart`` when resuming; ``None`` lets the engine probe on a fresh start.
     transfer_mode: str | None = None
     multipart_resume: MultiPartResumeState | None = None
+    # Page the link came from, when the caller knows it. Never invented by the engine.
+    referer: str | None = None
+    # Cookies already established for this transfer (e.g. by the multi-part probe's
+    # redirect chain). Sent as plain name/value pairs, only for this download.
+    cookies: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)

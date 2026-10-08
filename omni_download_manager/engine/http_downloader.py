@@ -13,6 +13,10 @@ Design notes
   request (with ``If-Range`` when the server gave us a validator). If the server
   ignores or rejects the range, the transfer transparently restarts from zero.
 * ``Accept-Encoding: identity`` is requested so byte counts match ``Content-Length``.
+* A 200 response is not assumed to be the file: the first slice is inspected (see
+  :mod:`omni_download_manager.engine.response`) before any name is reserved on disk,
+  so a server that answers a download link with a small HTML page produces an error
+  instead of a completed entry in the history.
 """
 
 from __future__ import annotations
@@ -22,12 +26,11 @@ import re
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Mapping
+from typing import Iterator, Mapping
 
 import requests
 import urllib3
 
-from omni_download_manager.constants import VERSION
 from omni_download_manager.core.errors import (
     AppError,
     HttpStatusError,
@@ -51,13 +54,69 @@ from omni_download_manager.engine.filenames import (
     partial_path_for,
     reserve_partial,
 )
+from omni_download_manager.engine.response import ResponseVerdict, analyze_response
 from omni_download_manager.engine.speed import DownloadSpeedLimiter, SpeedMeter
 
 logger = logging.getLogger(__name__)
 
+# Browser-like enough for servers that reject anything that isn't. Override with the
+# ``user_agent`` constructor argument when a caller wants to identify itself instead.
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+
 _CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECASE)
 _RANGE_UNSATISFIED = re.compile(r"^\s*bytes\s+\*/(\d+)\s*$", re.IGNORECASE)
 _MAX_RANGE_ATTEMPTS = 3
+# Redirect chains are followed automatically, but never without a bound.
+MAX_REDIRECTS = 20
+# One extra attempt when the first response is not the requested file: the redirect
+# chain of that attempt leaves cookies in the session, which the second one reuses.
+_MAX_RESPONSE_ATTEMPTS = 2
+
+
+def apply_session_headers(
+    session: requests.Session,
+    *,
+    user_agent: str,
+    referer: str | None = None,
+    cookies: tuple[tuple[str, str], ...] = (),
+) -> None:
+    """Set the shared request headers everywhere a transfer talks to a server.
+
+    Single-stream downloads, the multi-part probe and every segment all go through
+    here so the three stay consistent. ``Accept-Encoding: identity`` is deliberate:
+    ``Content-Length`` and ``Range`` arithmetic only line up when nothing is
+    transparently decompressed. A ``Referer`` is sent only when the caller supplied
+    one - it is never invented.
+    """
+    session.headers.update(
+        {
+            "User-Agent": user_agent,
+            "Accept": "*/*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "identity",
+        }
+    )
+    if referer:
+        session.headers["Referer"] = referer
+    if cookies:
+        session.cookies.update(dict(cookies))
+
+
+def unexpected_response_error(verdict: ResponseVerdict, url: str) -> NetworkError:
+    """Turn a rejected response into the error the existing UI already shows."""
+    if verdict.reason == "html":
+        message = "The server sent a web page instead of the requested file."
+    else:
+        message = "The server sent an empty response instead of the requested file."
+    return NetworkError(
+        message,
+        detail=f"{verdict.detail} (request: {url})",
+        # The same link would answer the same way; the caller decides what to do next.
+        retryable=False,
+    )
 
 
 class HttpDownloader:
@@ -71,7 +130,7 @@ class HttpDownloader:
     ) -> None:
         self._chunk_size = chunk_size
         self._progress_interval = progress_interval
-        self._user_agent = user_agent or f"ODM/{VERSION}"
+        self._user_agent = user_agent or DEFAULT_USER_AGENT
         self._speed_limiter = speed_limiter or DownloadSpeedLimiter()
 
     def set_speed_limit_mib(self, value: float) -> None:
@@ -87,13 +146,13 @@ class HttpDownloader:
             raise storage_error_from_os(exc) from exc
 
         with requests.Session() as session:
-            session.headers.update(
-                {
-                    "User-Agent": self._user_agent,
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                }
+            apply_session_headers(
+                session,
+                user_agent=self._user_agent,
+                referer=job.referer,
+                cookies=job.cookies,
             )
+            session.max_redirects = MAX_REDIRECTS
             try:
                 return self._run(session, job, control, observer)
             except requests.RequestException as exc:
@@ -114,11 +173,68 @@ class HttpDownloader:
         if control.stop_requested:
             return self._stopped(control, part_path, offset, None)
 
-        response, offset = self._open_response(session, job, offset)
-        if response is None:
-            return self._already_complete(job, part_path, offset, observer)
-        with closing(response):
-            return self._receive(response, job, control, observer, part_path, offset)
+        # At most two attempts: the second one reuses whatever cookies the first
+        # redirect chain collected in this session.
+        verdict: ResponseVerdict | None = None
+        for attempt in range(_MAX_RESPONSE_ATTEMPTS):
+            response, offset = self._open_response(session, job, offset)
+            if response is None:
+                return self._already_complete(job, part_path, offset, observer)
+            with closing(response):
+                headers = response.headers
+                name = (
+                    job.filename
+                    if job.filename_resolved
+                    else derive_filename(response.url, headers, job.url)
+                )
+                iterator, first, verdict = self._peek(response, job, offset, name)
+                if verdict.ok:
+                    return self._receive(
+                        response,
+                        job,
+                        control,
+                        observer,
+                        part_path,
+                        offset,
+                        name,
+                        iterator,
+                        first,
+                    )
+                if control.stop_requested:
+                    return self._stopped(control, part_path, offset, None)
+                if attempt + 1 < _MAX_RESPONSE_ATTEMPTS:
+                    logger.warning(
+                        "Attempt %d for %s did not return a file (%s); retrying",
+                        attempt + 1,
+                        job.url,
+                        verdict.reason,
+                    )
+                    continue
+        assert verdict is not None
+        raise unexpected_response_error(verdict, job.url)
+
+    def _peek(
+        self, response: requests.Response, job: DownloadJob, offset: int, name: str
+    ) -> tuple[Iterator[bytes], bytes | None, ResponseVerdict]:
+        """Read the first body slice and decide whether this is really a file.
+
+        Nothing has been written to disk at this point, so a rejected response leaves
+        neither a partial file nor an entry in the history. The iterator is handed
+        back so the transfer continues from exactly where the inspection stopped.
+        """
+        iterator = response.iter_content(self._chunk_size)
+        first = _next_chunk(iterator)
+        verdict = analyze_response(
+            headers=response.headers,
+            final_url=response.url,
+            first_chunk=first,
+            offset=offset,
+            declared_total=_total_size(response, offset),
+            filename=name,
+        )
+        if not verdict.ok:
+            logger.warning("Rejected response for %s: %s", job.url, verdict.detail)
+        return iterator, first, verdict
 
     def _open_response(
         self, session: requests.Session, job: DownloadJob, offset: int
@@ -178,20 +294,18 @@ class HttpDownloader:
         observer: DownloadObserver,
         part_path: Path | None,
         offset: int,
+        name: str,
+        iterator: Iterator[bytes],
+        first: bytes | None,
     ) -> DownloadOutcome:
         headers = response.headers
         resumed = response.status_code == 206 and offset > 0
         total = _total_size(response, offset)
 
         if part_path is None:
-            name = (
-                job.filename
-                if job.filename_resolved
-                else derive_filename(response.url, headers)
-            )
+            # The filename was already derived in _run; reserve it on disk now that
+            # the response has been validated by _peek.
             name, part_path = reserve_partial(job.directory, name)
-        else:
-            name = job.filename
 
         observer.metadata_received(
             TransferMetadata(
@@ -215,13 +329,19 @@ class HttpDownloader:
         except OSError as exc:
             raise storage_error_from_os(exc) from exc
 
-        iterator = response.iter_content(self._chunk_size)
+        # The iterator and first chunk were obtained by _peek so the response could
+        # be validated before any name is reserved on disk. Continue from there.
+        pending_first = first
         with handle:
             while True:
                 if control.stop_requested:
                     stopped = True
                     break
-                chunk = _next_chunk(iterator)
+                if pending_first is not None:
+                    chunk = pending_first
+                    pending_first = None
+                else:
+                    chunk = _next_chunk(iterator)
                 if chunk is None:
                     break
                 if self._speed_limiter.wait_for(len(chunk), control):

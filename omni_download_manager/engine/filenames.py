@@ -59,12 +59,22 @@ def filename_from_content_disposition(value: str | None) -> str | None:
     return sanitize_filename(os.path.basename(name.replace("\\", "/")), fallback="") or None
 
 
-def derive_filename(final_url: str, headers: Mapping[str, str]) -> str:
-    """Name from Content-Disposition, else the URL path, else a generic name + extension."""
+def derive_filename(
+    final_url: str, headers: Mapping[str, str], original_url: str | None = None
+) -> str:
+    """Name from Content-Disposition, else the URL path, else a generic name + extension.
+
+    Priority is ``Content-Disposition`` → final (post-redirect) URL → the URL the user
+    actually asked for → generic name with an extension guessed from ``Content-Type``.
+    ``original_url`` only matters when the redirect landed somewhere with no usable
+    path segment, which is common for token/``/download?id=`` style links.
+    """
     name = filename_from_content_disposition(headers.get("Content-Disposition"))
     if name:
         return name
     name = filename_from_url(final_url)
+    if not name and original_url:
+        name = filename_from_url(original_url)
     if name:
         return name
     content_type = (headers.get("Content-Type") or "").split(";")[0].strip()
