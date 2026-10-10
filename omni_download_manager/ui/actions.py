@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from omni_download_manager.core.models import DownloadItem, DownloadStatus, StopReason
@@ -90,3 +90,64 @@ def menu_actions(item: DownloadItem) -> list[ActionSpec | None]:
         _spec(ItemAction.REMOVE, "trash", "Remove from list…", danger=True),
     ]
     return entries
+
+
+# ------------------------------------------------------------------ toolbar
+# The fixed top toolbar replaces the buttons that used to live on each card.
+# Its state is derived only from the current selection, so it can never drift
+# away from what the controller will actually accept.
+
+TOOLBAR_SPECS: tuple[ActionSpec, ...] = (
+    _spec(ItemAction.RESUME, "play-02", "Start / Continue", "Start or continue download"),
+    _spec(ItemAction.PAUSE, "pause-02", "Pause", "Pause download"),
+    _spec(ItemAction.RETRY, "retry-02", "Restart", "Restart download from the beginning"),
+    _spec(ItemAction.CANCEL, "cancel-02", "Cancel", "Cancel download", danger=True),
+    _spec(ItemAction.REMOVE, "trash-bin-02", "Delete", "Delete download"),
+    _spec(ItemAction.OPEN_FOLDER, "folder-02", "Open folder", "Open the containing folder"),
+    _spec(ItemAction.OPEN_FILE, "external", "Open file", "Open the downloaded file"),
+)
+
+# Actions the controller supports for a whole selection at once (``perform_bulk``).
+_BULK_ACTIONS = frozenset(
+    {ItemAction.PAUSE, ItemAction.RESUME, ItemAction.CANCEL, ItemAction.REMOVE}
+)
+
+_STARTABLE = frozenset({S.PENDING, S.QUEUED})
+_RETRYABLE = frozenset({S.FAILED, S.CANCELLED})
+
+
+def _enabled_for(action: ItemAction, items: list[DownloadItem]) -> bool:
+    if action in _BULK_ACTIONS:
+        if action is ItemAction.PAUSE:
+            return any(
+                (item.is_active or item.status is S.QUEUED) and item.resumable is not False
+                for item in items
+            )
+        if action is ItemAction.RESUME:
+            playable = _STARTABLE | {S.PAUSED}
+            return any(item.status in playable for item in items)
+        if action is ItemAction.CANCEL:
+            return any(item.status not in (S.COMPLETED, S.CANCELLED) for item in items)
+        return True  # REMOVE always applies to a selection
+    if len(items) != 1:
+        # Start/retry/open only exist as single-item operations in the controller.
+        return False
+    item = items[0]
+    if action is ItemAction.START:
+        return item.status in _STARTABLE
+    if action is ItemAction.RETRY:
+        return item.status in _RETRYABLE
+    if action is ItemAction.OPEN_FILE:
+        return item.status is S.COMPLETED
+    return True  # OPEN_FOLDER: useful for any download that has a destination
+
+
+def toolbar_enabled(items: list[DownloadItem]) -> dict[ItemAction, bool]:
+    """Which toolbar actions the given selection allows, in ``TOOLBAR_SPECS`` order."""
+    return {spec.action: bool(items) and _enabled_for(spec.action, items) for spec in TOOLBAR_SPECS}
+
+
+def toolbar_specs(items: list[DownloadItem]) -> list[ActionSpec]:
+    """``TOOLBAR_SPECS`` with ``enabled`` resolved for the current selection."""
+    enabled = toolbar_enabled(items)
+    return [replace(spec, enabled=enabled[spec.action]) for spec in TOOLBAR_SPECS]

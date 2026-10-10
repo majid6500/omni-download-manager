@@ -140,6 +140,23 @@ class AddDownloadDialogTests(unittest.TestCase):
             self.assertFalse(store.get().use_system_proxy)
             page.close()
 
+    def test_settings_back_button_emits_navigation_request(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = AppPaths(Path(tmp))
+            page = SettingsPage(
+                SettingsStore.load(Path(tmp) / "settings.json"),
+                ThemeManager(),
+                paths,
+            )
+            requested: list[bool] = []
+            page.backRequested.connect(lambda: requested.append(True))
+
+            page._back_button.click()
+
+            self.assertEqual(requested, [True])
+            self.assertFalse(page._back_button.icon().isNull())
+            page.close()
+
     def test_settings_background_updates_when_switching_to_light_theme(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             theme = ThemeManager("dark")

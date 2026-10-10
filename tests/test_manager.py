@@ -145,6 +145,19 @@ class ManagerTests(unittest.TestCase):
         self.manager.start(item.id)  # retry is allowed
         self.wait_status(item.id, S.FAILED)
 
+    def test_restart_discards_failed_partial_data_before_retrying(self) -> None:
+        item = self.manager.add(self.server.url("/missing"), self.dest)
+        self.wait_status(item.id, S.FAILED)
+        item = self.manager._items[item.id]
+        item.partial_path.write_bytes(b"partial data")
+        item.downloaded_bytes = len(b"partial data")
+
+        self.manager.restart(item.id)
+
+        self.assertFalse(item.partial_path.exists())
+        self.assertEqual(self.manager.get_item(item.id).downloaded_bytes, 0)
+        self.wait_status(item.id, S.FAILED)
+
     def test_connection_failure_marks_failed(self) -> None:
         item = self.manager.add("http://127.0.0.1:1/file.zip", self.dest)
         self.wait_status(item.id, S.FAILED, timeout=25)
@@ -388,6 +401,45 @@ class ManagerTests(unittest.TestCase):
         finally:
             manager2.shutdown(timeout=3)
         self.manager = self.make_manager()  # tearDown shuts it down
+
+    def test_shutdown_keeps_repository_open_until_slow_worker_finishes(self) -> None:
+        class TrackingRepository(SqliteDownloadRepository):
+            def __init__(self, path: Path) -> None:
+                super().__init__(path)
+                self.closed = threading.Event()
+
+            def close(self) -> None:
+                super().close()
+                self.closed.set()
+
+        class SlowToStopDownloader:
+            def __init__(self) -> None:
+                self.entered = threading.Event()
+                self.release = threading.Event()
+
+            def download(self, job, control, observer):
+                self.entered.set()
+                self.release.wait(timeout=5)
+                return DownloadOutcome(
+                    OutcomeKind.COMPLETED, job.directory / job.filename, 0, 0
+                )
+
+        self.manager.shutdown(timeout=3)
+        repository = TrackingRepository(self.db)
+        downloader = SlowToStopDownloader()
+        settings = Settings(download_dir=str(self.dest), connect_timeout=3, read_timeout=5)
+        self.manager = DownloadManager(repository, downloader, lambda: settings)
+
+        item = self.manager.add(self.server.url("/file.bin"), self.dest)
+        self.assertTrue(downloader.entered.wait(timeout=3))
+        self.manager.shutdown(timeout=0.01)
+
+        self.assertFalse(repository.closed.is_set())
+        self.assertEqual(self.status(item.id), S.CONNECTING)
+
+        downloader.release.set()
+        self.assertTrue(wait_for(repository.closed.is_set, timeout=3))
+        self.assertEqual(self.status(item.id), S.COMPLETED)
 
     def test_crash_recovery_marks_interrupted_downloads_paused(self) -> None:
         repo = SqliteDownloadRepository(self.db)

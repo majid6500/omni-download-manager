@@ -70,9 +70,8 @@ class ItemActionController(QObject):
         elif action is ItemAction.RESUME:
             startable = {
                 DownloadStatus.PENDING,
+                DownloadStatus.QUEUED,
                 DownloadStatus.PAUSED,
-                DownloadStatus.FAILED,
-                DownloadStatus.CANCELLED,
             }
             targets = [item for item in items if item.status in startable]
             operation = self._manager.start
@@ -131,8 +130,10 @@ class ItemActionController(QObject):
 
     def _perform(self, action: ItemAction, item_id: str) -> None:
         manager = self._manager
-        if action in (ItemAction.START, ItemAction.RESUME, ItemAction.RETRY):
+        if action in (ItemAction.START, ItemAction.RESUME):
             manager.start(item_id)
+        elif action is ItemAction.RETRY:
+            manager.restart(item_id)
         elif action is ItemAction.PAUSE:
             manager.pause(item_id)
         elif action is ItemAction.CANCEL:

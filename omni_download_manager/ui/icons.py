@@ -29,7 +29,10 @@ def icon_pixmap(name: str, color: str | QColor, size: int, dpr: float = 1.0) -> 
     if cached is not None:
         return cached
 
-    renderer = QSvgRenderer(QByteArray(_svg_source(name).replace("currentColor", tint).encode("utf-8")))
+    source = _svg_source(name).replace("currentColor", tint)
+    if name.endswith("-02"):
+        source = source.replace("#1C274C", tint)
+    renderer = QSvgRenderer(QByteArray(source.encode("utf-8")))
     pixmap = QPixmap(int(size * dpr), int(size * dpr))
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)

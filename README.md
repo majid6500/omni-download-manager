@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>117 Tests Passing</b>
+  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
 </p>
 
 ---
@@ -60,7 +60,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 - Search by filename or URL.
 - Sort by newest, oldest, filename, or file size.
 - File-type categories: Archives, Video, Audio, Images, Documents, Programs, and Other.
-- Multi-selection with `Ctrl` / `Shift`; a plain click selects a single row.
+- Multi-selection with `Ctrl` / `Shift`; a plain click selects one row, and clicking that selected row again clears the selection.
 - Bulk pause, resume, cancel, and remove actions.
 - Open downloaded files or their containing folders.
 - Copy download URLs from the context menu.
@@ -166,7 +166,7 @@ Run the complete test suite with:
 python -m unittest discover -s tests -t .
 ```
 
-The current verified suite contains **117 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, completion notifications, and icon loading.
+The current verified suite contains **142 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, completion notifications, and icon loading.
 
 Download-related tests use a **local HTTP server**, so they do not depend on an external download service.
 

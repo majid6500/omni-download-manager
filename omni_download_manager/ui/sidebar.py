@@ -1,4 +1,4 @@
-"""Left navigation: logo, download views, settings."""
+"""Bottom navigation for the download views."""
 
 from __future__ import annotations
 
@@ -8,15 +8,13 @@ from PySide6.QtWidgets import (
     QAbstractButton,
     QButtonGroup,
     QHBoxLayout,
-    QLabel,
-    QVBoxLayout,
+    QSizePolicy,
     QWidget,
 )
 
 from omni_download_manager.ui.icons import icon_pixmap
 from omni_download_manager.ui.models import ViewFilter
 from omni_download_manager.ui.theme import ThemeManager
-from omni_download_manager.ui.widgets import make_label
 
 SETTINGS_KEY = "settings"
 _VIEW_ICONS = {
@@ -35,7 +33,8 @@ class NavButton(QAbstractButton):
         self._count: int | None = None
         self.setText(text)
         self.setCheckable(True)
-        self.setFixedHeight(40)
+        self.setFixedHeight(54)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         theme.changed.connect(self.update)
@@ -45,7 +44,7 @@ class NavButton(QAbstractButton):
         self.update()
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(180, 40)
+        return QSize(180, 54)
 
     def paintEvent(self, event) -> None:  # noqa: N802
         palette = self._theme.palette
@@ -59,36 +58,64 @@ class NavButton(QAbstractButton):
                 background.setAlpha(40)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(background)
-            painter.drawRoundedRect(QRectF(self.rect()), 10, 10)
+            painter.drawRoundedRect(QRectF(self.rect()).adjusted(0, 1, 0, -1), 9, 9)
 
         color = palette.accent if checked else (palette.text if hover else palette.text_muted)
-        painter.drawPixmap(QPointF(14, (self.height() - 18) / 2), icon_pixmap(self._icon, color, 18, self.devicePixelRatioF()))
-
         font = QFont(self.font())
         font.setWeight(QFont.Weight.DemiBold if checked else QFont.Weight.Medium)
         painter.setFont(font)
         metrics = QFontMetrics(font)
         baseline = self.height() / 2 + (metrics.ascent() - metrics.descent()) / 2
+        icon_size = 18
+        gap = 8
+        label_width = metrics.horizontalAdvance(self.text())
+        content_width = icon_size + gap + label_width
+        content_left = max(12, (self.width() - content_width) / 2)
+        painter.drawPixmap(
+            QPointF(content_left, (self.height() - icon_size) / 2),
+            icon_pixmap(self._icon, color, icon_size, self.devicePixelRatioF()),
+        )
         painter.setPen(QColor(palette.text if checked else color))
-        painter.drawText(QPointF(44, baseline), self.text())
+        painter.drawText(QPointF(content_left + icon_size + gap, baseline), self.text())
 
         if self._count:
+            # A small pill so the count reads as metadata, not as part of the label.
             small = QFont(font)
             small.setPointSizeF(max(8.0, font.pointSizeF() - 1))
             painter.setFont(small)
-            painter.setPen(QColor(palette.text_faint))
+            small_metrics = QFontMetrics(small)
             label = str(self._count)
-            painter.drawText(QPointF(self.width() - 14 - QFontMetrics(small).horizontalAdvance(label), baseline), label)
+            pill_width = small_metrics.horizontalAdvance(label) + 14
+            pill_height = 20
+            pill = QRectF(
+                self.width() - 16 - pill_width,
+                (self.height() - pill_height) / 2,
+                pill_width,
+                pill_height,
+            )
+            pill_bg = QColor(palette.accent if checked else palette.surface_raised)
+            if checked:
+                pill_bg.setAlpha(70)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(pill_bg)
+            painter.drawRoundedRect(pill, pill_height / 2, pill_height / 2)
+            painter.setPen(QColor(palette.text if checked else palette.text_faint))
+            painter.drawText(
+                pill,
+                Qt.AlignmentFlag.AlignCenter,
+                label,
+            )
 
 
-class Sidebar(QWidget):
-    selected = Signal(str)  # a ViewFilter value or SETTINGS_KEY
+class BottomNavigation(QWidget):
+    selected = Signal(str)
 
-    def __init__(self, theme: ThemeManager, app_name: str, version: str, logo, parent=None) -> None:
+    def __init__(self, theme: ThemeManager, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("Sidebar")
+        self.setObjectName("BottomNavigation")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(232)
+        self.setFixedHeight(72)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         group = QButtonGroup(self)
         group.setExclusive(True)
@@ -101,25 +128,16 @@ class Sidebar(QWidget):
             self._buttons[key] = button
             return button
 
-        logo_label = QLabel()
-        logo_label.setPixmap(logo.pixmap(32, 32))
-        brand = QHBoxLayout()
-        brand.setSpacing(12)
-        brand.addWidget(logo_label)
-        brand.addWidget(make_label(app_name, name="AppName"))
-        brand.addStretch(1)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 22, 16, 16)
-        layout.setSpacing(4)
-        layout.addLayout(brand)
-        layout.addSpacing(26)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(24, 8, 24, 8)
+        layout.setSpacing(8)
         for view in ViewFilter:
-            layout.addWidget(add(view.value, _VIEW_ICONS[view], view.title if view is not ViewFilter.ALL else "All downloads"))
-        layout.addStretch(1)
-        layout.addWidget(add(SETTINGS_KEY, "sliders", "Settings"))
-        layout.addSpacing(8)
-        layout.addWidget(make_label(f"Version {version}", role="faint"))
+            button = add(
+                view.value,
+                _VIEW_ICONS[view],
+                view.title if view is not ViewFilter.ALL else "All downloads",
+            )
+            layout.addWidget(button, 1)
 
         self._buttons[ViewFilter.ALL.value].setChecked(True)
 

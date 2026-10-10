@@ -2,8 +2,8 @@
 
 Cards are painted rather than built from child widgets: it keeps scrolling smooth with
 long histories and gives full control over the visual design. Text content comes from
-``presentation`` and the available buttons from ``actions`` so this file only handles
-geometry and drawing.
+``presentation`` so this file only handles geometry and drawing. Actions live in the
+fixed toolbar, not on the card.
 """
 
 from __future__ import annotations
@@ -16,10 +16,9 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 
 from omni_download_manager.core.filetypes import FileCategory, badge_label, categorize
 from omni_download_manager.core.models import DownloadItem, DownloadStatus
-from omni_download_manager.ui.actions import ActionSpec, ItemAction, row_buttons
-from omni_download_manager.ui.icons import icon_pixmap
 from omni_download_manager.ui.models import ITEM_ROLE
 from omni_download_manager.ui.presentation import (
+    CardText,
     Tone,
     describe,
     is_indeterminate,
@@ -31,13 +30,18 @@ from omni_download_manager.ui.theme import Palette, ThemeManager
 ROW_HEIGHT = 92
 CARD_MARGIN_V = 4
 CARD_MARGIN_RIGHT = 12
+CARD_RADIUS = 8
 PADDING = 16
 BADGE_SIZE = 44
-BUTTON_SIZE = 32
-BUTTON_GAP = 4
-MAX_BUTTONS = 3
-BAR_HEIGHT = 6
+BAR_HEIGHT = 8
 PERCENT_WIDTH = 46
+PILL_HEIGHT = 20
+PILL_RADIUS = 6
+
+# Vertical anchors inside the card.
+TITLE_TOP = 11
+DETAIL_TOP = 34
+BOTTOM_TOP = 56
 
 S = DownloadStatus
 
@@ -68,8 +72,6 @@ class DownloadItemDelegate(QStyledItemDelegate):
     def __init__(self, theme: ThemeManager, parent=None) -> None:
         super().__init__(parent)
         self._theme = theme
-        self.hovered: tuple[str, ItemAction] | None = None
-        self.pressed: tuple[str, ItemAction] | None = None
 
     # ------------------------------------------------------------- geometry
 
@@ -79,24 +81,6 @@ class DownloadItemDelegate(QStyledItemDelegate):
     @staticmethod
     def card_rect(row_rect: QRect) -> QRectF:
         return QRectF(row_rect).adjusted(0, CARD_MARGIN_V, -CARD_MARGIN_RIGHT, -CARD_MARGIN_V)
-
-    def button_rects(self, row_rect: QRect, item: DownloadItem) -> list[tuple[ActionSpec, QRectF]]:
-        card = self.card_rect(row_rect)
-        specs = row_buttons(item)
-        y = card.center().y() - BUTTON_SIZE / 2
-        right = card.right() - 14
-        result = []
-        for position, spec in enumerate(specs):
-            remaining = len(specs) - position
-            x = right - remaining * BUTTON_SIZE - (remaining - 1) * BUTTON_GAP
-            result.append((spec, QRectF(x, y, BUTTON_SIZE, BUTTON_SIZE)))
-        return result
-
-    def action_at(self, row_rect: QRect, item: DownloadItem, pos: QPointF) -> ActionSpec | None:
-        for spec, rect in self.button_rects(row_rect, item):
-            if rect.contains(pos):
-                return spec
-        return None
 
     # --------------------------------------------------------------- paint
 
@@ -117,29 +101,46 @@ class DownloadItemDelegate(QStyledItemDelegate):
             | QPainter.RenderHint.SmoothPixmapTransform
         )
 
-        painter.setPen(QPen(QColor(palette.accent if selected else palette.border), 1))
-        painter.setBrush(QColor(palette.surface_hover if hovered else palette.surface))
-        painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
-
+        self._paint_card(painter, card, selected, hovered, palette)
         self._paint_badge(painter, card, item, palette)
 
         text_left = card.left() + PADDING + BADGE_SIZE + 14
-        buttons_width = MAX_BUTTONS * BUTTON_SIZE + (MAX_BUTTONS - 1) * BUTTON_GAP
-        text_right = card.right() - 14 - buttons_width - 16
-        text_width = max(40.0, text_right - text_left)
+        text_right = card.right() - PADDING
+        pill, pill_width = self._pill_rect(option.font, text, text_right, card.top())
+        # Title stops short of the status pill so long names never run underneath it.
+        text_width = max(40.0, text_right - pill_width - 12 - text_left)
+        if pill is None:
+            text_width = max(40.0, text_right - text_left)
 
-        self._paint_title(painter, option.font, item, text_left, card.top() + 11, text_width, palette)
-        self._paint_status_line(painter, option.font, text, text_left, card.top() + 34, text_width, palette)
+        self._paint_title(painter, option.font, item, text_left, card.top() + TITLE_TOP, text_width, palette)
+        if pill is not None:
+            self._paint_pill(painter, option.font, text, pill, palette)
+        if text.detail:
+            self._paint_detail(
+                painter, option.font, text.detail, text_left, card.top() + DETAIL_TOP,
+                text_right - text_left, palette,
+            )
 
-        bottom = QRectF(text_left, card.top() + 56, text_width, 16)
+        bottom = QRectF(text_left, card.top() + BOTTOM_TOP, text_right - text_left, 16)
         if shows_progress_bar(item):
             self._paint_progress(painter, option.font, item, bottom, palette)
         elif text.footer:
             self._paint_footer(painter, option.font, text.footer, text.footer_tone, bottom, palette)
-
-        for spec, rect in self.button_rects(option.rect, item):
-            self._paint_button(painter, item, spec, rect, palette)
         painter.restore()
+
+    def _paint_card(self, painter, card: QRectF, selected: bool, hovered: bool, palette: Palette) -> None:
+        background = QColor(palette.surface_hover if hovered else palette.surface)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(background)
+        painter.drawRoundedRect(card, CARD_RADIUS, CARD_RADIUS)
+        if selected:
+            overlay = QColor(palette.accent)
+            overlay.setAlpha(20)
+            painter.setBrush(overlay)
+            painter.drawRoundedRect(card, CARD_RADIUS, CARD_RADIUS)
+        painter.setPen(QPen(QColor(palette.accent if selected else palette.border), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), CARD_RADIUS, CARD_RADIUS)
 
     def _paint_badge(self, painter, card: QRectF, item: DownloadItem, palette: Palette) -> None:
         color = QColor(CATEGORY_COLORS[categorize(item.filename)])
@@ -175,25 +176,50 @@ class DownloadItemDelegate(QStyledItemDelegate):
         elided = metrics.elidedText(item.filename, Qt.TextElideMode.ElideMiddle, int(width))
         painter.drawText(QPointF(x, y + metrics.ascent() + 2), elided)
 
-    def _paint_status_line(self, painter, base_font: QFont, text, x, y, width, palette) -> None:
+    # ---------------------------------------------------------------- status
+
+    @staticmethod
+    def _pill_font(base_font: QFont) -> QFont:
         font = QFont(base_font)
         font.setPointSizeF(max(8.0, base_font.pointSizeF() - 0.5))
+        font.setWeight(QFont.Weight.DemiBold)
+        return font
+
+    def _pill_rect(
+        self, base_font: QFont, text: CardText, right: float, card_top: float
+    ) -> tuple[QRectF | None, float]:
+        """Right-aligned status pill for the title row; ``None`` when there is no status."""
+        if not text.status:
+            return None, 0.0
+        metrics = QFontMetrics(self._pill_font(base_font))
+        width = float(metrics.horizontalAdvance(text.status) + 16)
+        return QRectF(right - width, card_top + 8, width, PILL_HEIGHT), width
+
+    def _paint_pill(self, painter, base_font: QFont, text: CardText, rect: QRectF, palette: Palette) -> None:
+        color = tone_color(palette, text.tone)
+        fill = QColor(color)
+        fill.setAlpha(32)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, PILL_RADIUS, PILL_RADIUS)
+
+        font = self._pill_font(base_font)
+        painter.setFont(font)
+        painter.setPen(color)
+        painter.drawText(
+            QRectF(rect.left(), rect.top(), rect.width(), rect.height()),
+            Qt.AlignmentFlag.AlignCenter,
+            text.status,
+        )
+
+    def _paint_detail(self, painter, base_font: QFont, detail, x, y, width, palette) -> None:
+        font = QFont(base_font)
+        font.setPointSizeF(max(8.0, base_font.pointSizeF() - 0.5))
+        painter.setFont(font)
+        painter.setPen(QColor(palette.text_muted))
         metrics = QFontMetrics(font)
-        baseline = y + metrics.ascent() + 1
-
-        label_font = QFont(font)
-        label_font.setWeight(QFont.Weight.DemiBold)
-        label_metrics = QFontMetrics(label_font)
-        painter.setFont(label_font)
-        painter.setPen(tone_color(palette, text.tone))
-        painter.drawText(QPointF(x, baseline), text.status)
-
-        if text.detail:
-            offset = label_metrics.horizontalAdvance(text.status) + 10
-            painter.setFont(font)
-            painter.setPen(QColor(palette.text_muted))
-            detail = metrics.elidedText(text.detail, Qt.TextElideMode.ElideRight, int(max(0, width - offset)))
-            painter.drawText(QPointF(x + offset, baseline), detail)
+        elided = metrics.elidedText(detail, Qt.TextElideMode.ElideRight, int(width))
+        painter.drawText(QPointF(x, y + metrics.ascent() + 1), elided)
 
     def _paint_footer(self, painter, base_font: QFont, footer, tone, rect: QRectF, palette) -> None:
         font = QFont(base_font)
@@ -203,9 +229,14 @@ class DownloadItemDelegate(QStyledItemDelegate):
         painter.setPen(color)
         metrics = QFontMetrics(font)
         elided = metrics.elidedText(footer, Qt.TextElideMode.ElideMiddle, int(rect.width()))
-        painter.drawText(QPointF(rect.left(), rect.center().y() + (metrics.ascent() - metrics.descent()) / 2), elided)
+        painter.drawText(
+            QPointF(rect.left(), rect.center().y() + (metrics.ascent() - metrics.descent()) / 2),
+            elided,
+        )
 
-    def _paint_progress(self, painter, base_font: QFont, item: DownloadItem, rect: QRectF, palette) -> None:
+    # -------------------------------------------------------------- progress
+
+    def _paint_progress(self, painter, base_font: QFont, item: DownloadItem, rect: QRectF, palette: Palette) -> None:
         track = QRectF(rect.left(), rect.center().y() - BAR_HEIGHT / 2, rect.width() - PERCENT_WIDTH, BAR_HEIGHT)
         fill_color = {
             S.PAUSED: QColor(palette.warning),
@@ -227,6 +258,7 @@ class DownloadItemDelegate(QStyledItemDelegate):
             x = track.left() - segment + phase * (track.width() + segment)
             painter.drawRoundedRect(QRectF(x, track.top(), segment, BAR_HEIGHT), BAR_HEIGHT / 2, BAR_HEIGHT / 2)
             painter.restore()
+            self._paint_percent(painter, base_font, item, rect, palette)
             return
 
         fills = item.segment_fill
@@ -247,7 +279,9 @@ class DownloadItemDelegate(QStyledItemDelegate):
                 painter.drawRoundedRect(
                     QRectF(track.left(), track.top(), width, BAR_HEIGHT), BAR_HEIGHT / 2, BAR_HEIGHT / 2
                 )
+        self._paint_percent(painter, base_font, item, rect, palette)
 
+    def _paint_percent(self, painter, base_font: QFont, item: DownloadItem, rect: QRectF, palette: Palette) -> None:
         font = QFont(base_font)
         font.setPointSizeF(max(8.0, base_font.pointSizeF() - 0.5))
         font.setWeight(QFont.Weight.DemiBold)
@@ -256,7 +290,10 @@ class DownloadItemDelegate(QStyledItemDelegate):
         metrics = QFontMetrics(font)
         label = percent_text(item)
         painter.drawText(
-            QPointF(rect.right() - metrics.horizontalAdvance(label), rect.center().y() + (metrics.ascent() - metrics.descent()) / 2),
+            QPointF(
+                rect.right() - metrics.horizontalAdvance(label),
+                rect.center().y() + (metrics.ascent() - metrics.descent()) / 2,
+            ),
             label,
         )
 
@@ -327,24 +364,3 @@ class DownloadItemDelegate(QStyledItemDelegate):
                         label,
                     )
             x += slot + gap
-
-    def _paint_button(self, painter, item: DownloadItem, spec: ActionSpec, rect: QRectF, palette: Palette) -> None:
-        key = (item.id, spec.action)
-        is_hover = self.hovered == key and spec.enabled
-        is_pressed = self.pressed == key and spec.enabled
-        if is_hover:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(palette.border if is_pressed else palette.surface_raised))
-            painter.drawRoundedRect(rect, 8, 8)
-
-        if not spec.enabled:
-            color = palette.text_faint
-        elif is_hover and spec.danger:
-            color = palette.danger
-        elif is_hover:
-            color = palette.text
-        else:
-            color = palette.text_muted
-        dpr = painter.device().devicePixelRatioF()
-        pixmap = icon_pixmap(spec.icon, color, 18, dpr)
-        painter.drawPixmap(QPointF(rect.center().x() - 9, rect.center().y() - 9), pixmap)

@@ -6,11 +6,11 @@ import logging
 
 from PySide6.QtCore import QByteArray, Qt
 from PySide6.QtGui import QCloseEvent
-from PySide6.QtWidgets import QHBoxLayout, QMainWindow, QStackedWidget, QWidget
+from PySide6.QtWidgets import QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from omni_download_manager.config.paths import AppPaths
 from omni_download_manager.config.settings import SettingsStore
-from omni_download_manager.constants import APP_NAME, APP_SHORT_NAME, VERSION
+from omni_download_manager.constants import APP_NAME
 from omni_download_manager.core.errors import AppError
 from omni_download_manager.core.models import DownloadItem, DownloadStatus
 from omni_download_manager.services.download_manager import DownloadManager
@@ -22,7 +22,7 @@ from omni_download_manager.ui.icons import logo_icon
 from omni_download_manager.ui.models import DownloadListModel, ViewFilter
 from omni_download_manager.ui.notifications import CompletionNotifier
 from omni_download_manager.ui.settings_page import SettingsPage
-from omni_download_manager.ui.sidebar import SETTINGS_KEY, Sidebar
+from omni_download_manager.ui.sidebar import BottomNavigation, SETTINGS_KEY
 from omni_download_manager.ui.theme import ThemeManager
 from omni_download_manager.ui.windows_effects import apply_title_bar_theme
 
@@ -64,7 +64,7 @@ class MainWindow(QMainWindow):
 
         self._controller = ItemActionController(manager, settings, theme, lambda: self)
 
-        self._sidebar = Sidebar(theme, APP_SHORT_NAME, VERSION, logo_icon())
+        self._navigation = BottomNavigation(theme)
         self._downloads = DownloadsPage(self._model, theme)
         self._settings_page = SettingsPage(settings, theme, paths)
         self._pages = QStackedWidget()
@@ -73,15 +73,19 @@ class MainWindow(QMainWindow):
 
         root = QWidget()
         root.setObjectName("Root")
-        layout = QHBoxLayout(root)
+        layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._sidebar)
         layout.addWidget(self._pages, 1)
+        layout.addWidget(self._navigation)
         self.setCentralWidget(root)
 
-        self._sidebar.selected.connect(self._on_nav)
+        self._navigation.selected.connect(self._on_nav)
+        self._settings_page.backRequested.connect(
+            lambda: self._navigation.select(ViewFilter.ALL.value)
+        )
         self._downloads.addRequested.connect(self.show_add_dialog)
+        self._downloads.settingsRequested.connect(lambda: self._on_nav(SETTINGS_KEY))
         self._downloads.actionRequested.connect(self._controller.perform)
         self._downloads.bulkActionRequested.connect(self._controller.perform_bulk)
         self._downloads.contextMenuRequested.connect(self._controller.show_menu)
@@ -124,12 +128,12 @@ class MainWindow(QMainWindow):
 
     def _update_counts(self, *_args) -> None:
         items = self._model.items()
-        # Sidebar counts only change when a status changes, not on progress ticks.
+        # Navigation counts only change when a status changes, not on progress ticks.
         signature = tuple(item.status for item in items)
         if signature == self._counts_signature:
             return
         self._counts_signature = signature
-        self._sidebar.set_counts({v: sum(1 for i in items if v.matches(i)) for v in ViewFilter})
+        self._navigation.set_counts({v: sum(1 for i in items if v.matches(i)) for v in ViewFilter})
 
     # ------------------------------------------------------------------ add
 
@@ -149,7 +153,7 @@ class MainWindow(QMainWindow):
             scheduled_at=request.scheduled_at,
         )
         if self._downloads.view_filter is ViewFilter.COMPLETED or self._downloads.view_filter is ViewFilter.FAILED:
-            self._sidebar.select(ViewFilter.ALL.value)
+            self._navigation.select(ViewFilter.ALL.value)
 
     # ---------------------------------------------------------------- close
 

@@ -62,6 +62,33 @@ class ItemActionControllerTests(unittest.TestCase):
 
         manager.pause.assert_called_once_with(running.id)
 
+    def test_bulk_resume_does_not_retry_failed_or_cancelled_downloads(self) -> None:
+        items = [
+            DownloadItem(
+                url=f"https://example.com/{status.value}",
+                directory="/downloads",
+                filename=status.value,
+                status=status,
+            )
+            for status in (
+                DownloadStatus.PENDING,
+                DownloadStatus.QUEUED,
+                DownloadStatus.PAUSED,
+                DownloadStatus.FAILED,
+                DownloadStatus.CANCELLED,
+            )
+        ]
+        manager = Mock()
+        manager.get_item.side_effect = {item.id: item for item in items}.get
+        controller = ItemActionController(manager, Mock(), Mock(), Mock())
+
+        controller.perform_bulk("resume", [item.id for item in items])
+
+        self.assertCountEqual(
+            [call.args[0] for call in manager.start.call_args_list],
+            [item.id for item in items[:3]],
+        )
+
     def test_bulk_remove_can_delete_only_selected_completed_files(self) -> None:
         completed = DownloadItem(
             url="https://example.com/a",
@@ -111,14 +138,24 @@ class ItemActionControllerTests(unittest.TestCase):
         observed = []
         page.bulkActionRequested.connect(lambda action, ids: observed.append((action, ids)))
 
-        page._bulk_cancel.click()
+        page._toolbar._buttons[ItemAction.CANCEL].click()
 
         self.assertEqual(len(observed), 1)
         self.assertEqual(observed[0][0], "cancel")
         self.assertCountEqual(observed[0][1], [item.id for item in items])
         page.close()
 
-    def test_clicking_selected_card_again_keeps_it_selected(self) -> None:
+    def test_downloads_page_forwards_settings_button_request(self) -> None:
+        page = DownloadsPage(DownloadListModel(), ThemeManager())
+        observed: list[bool] = []
+        page.settingsRequested.connect(lambda: observed.append(True))
+
+        page._toolbar._settings.click()
+
+        self.assertEqual(observed, [True])
+        page.close()
+
+    def test_clicking_selected_card_again_deselects_it(self) -> None:
         model = DownloadListModel()
         model.set_items([
             DownloadItem(
@@ -136,25 +173,21 @@ class ItemActionControllerTests(unittest.TestCase):
         card_index = page._proxy.index(0, 0)
         card_rect = page._view.visualRect(card_index)
         click_point = QPoint(card_rect.left() + 80, card_rect.center().y())
-        hit_index, hit_item, hit_action = page._view._hit(click_point)
+        hit_index, hit_item = page._view._hit(click_point)
         self.assertEqual(hit_index, card_index)
         self.assertIsNotNone(hit_item)
-        self.assertIsNone(hit_action)
 
         QTest.mouseClick(page._view.viewport(), Qt.MouseButton.LeftButton, pos=click_point)
         self.assertEqual(len(page._view.selectionModel().selectedRows()), 1)
-        self.assertTrue(page._bulk_remove.isVisible())
+        self.assertTrue(page._toolbar._buttons[ItemAction.REMOVE].isEnabled())
 
         QTest.qWait(QApplication.doubleClickInterval() + 50)
         self.assertTrue(page._view.selectionModel().isSelected(card_index))
         QTest.mouseClick(page._view.viewport(), Qt.MouseButton.LeftButton, pos=click_point)
 
-        # A plain click always lands on the row it is over; only Ctrl/Shift toggle
-        # or extend the selection, so re-clicking keeps the card selected.
-        self.assertEqual(len(page._view.selectionModel().selectedRows()), 1)
-        self.assertTrue(page._view.selectionModel().isSelected(card_index))
-        self.assertTrue(page._bulk_remove.isVisible())
-        self.assertEqual(page._selection_count.text(), "1 selected")
+        self.assertEqual(page._view.selectionModel().selectedRows(), [])
+        self.assertFalse(page._toolbar._buttons[ItemAction.REMOVE].isEnabled())
+        self.assertEqual(page._toolbar._count.text(), "")
         page.close()
 
     def test_plain_click_replaces_selection_and_ctrl_click_extends_it(self) -> None:
@@ -194,7 +227,7 @@ class ItemActionControllerTests(unittest.TestCase):
         QTest.qWait(QApplication.doubleClickInterval() + 50)
 
         self.assertEqual(len(page._view.selectionModel().selectedRows()), 2)
-        self.assertTrue(page._bulk_remove.isVisible())
+        self.assertTrue(page._toolbar._buttons[ItemAction.REMOVE].isEnabled())
 
         # A plain click moves the selection to the row it lands on instead of
         # adding another row to it.
@@ -207,7 +240,7 @@ class ItemActionControllerTests(unittest.TestCase):
         QTest.qWait(QApplication.doubleClickInterval() + 50)
 
         self.assertEqual(len(page._view.selectionModel().selectedRows()), 1)
-        self.assertTrue(page._bulk_remove.isVisible())
+        self.assertTrue(page._toolbar._buttons[ItemAction.REMOVE].isEnabled())
         remaining = page._view.selectionModel().selectedRows()[0]
         remaining_item = page._view.item_at(remaining)
         self.assertIsNotNone(remaining_item)

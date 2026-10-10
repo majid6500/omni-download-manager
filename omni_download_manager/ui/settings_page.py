@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -22,12 +22,15 @@ from omni_download_manager.config.paths import AppPaths
 from omni_download_manager.config.settings import SettingsStore
 from omni_download_manager.core.errors import AppError
 from omni_download_manager.ui.dialogs import show_error
+from omni_download_manager.ui.icons import make_icon
 from omni_download_manager.ui.theme import ThemeManager
 from omni_download_manager.ui.widgets import Toggle, make_divider, make_label
 from omni_download_manager.utils.system import open_path
 
 
 class SettingsPage(QWidget):
+    backRequested = Signal()
+
     def __init__(self, store: SettingsStore, theme: ThemeManager, paths: AppPaths, parent=None) -> None:
         super().__init__(parent)
         self.setObjectName("SettingsPage")
@@ -98,7 +101,23 @@ class SettingsPage(QWidget):
         column = QVBoxLayout(content)
         column.setContentsMargins(32, 28, 32, 28)
         column.setSpacing(18)
-        column.addWidget(make_label("Settings", name="PageTitle"))
+        self._back_button = self._button("", "back")
+        self._back_button.setIconSize(QSize(18, 18))
+        self._back_button.setFixedSize(36, 36)
+        self._back_button.setAccessibleName("Back to downloads")
+        self._back_button.setToolTip("Back to downloads")
+        self._back_button.clicked.connect(self.backRequested)
+        self._update_back_icon()
+        theme.changed.connect(self._update_back_icon)
+
+        heading = QWidget()
+        heading_layout = QHBoxLayout(heading)
+        heading_layout.setContentsMargins(0, 0, 0, 0)
+        heading_layout.setSpacing(8)
+        heading_layout.addWidget(self._back_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        heading_layout.addWidget(make_label("Settings", name="PageTitle"), 0, Qt.AlignmentFlag.AlignVCenter)
+        heading_layout.addStretch(1)
+        column.addWidget(heading)
         column.addWidget(make_label("Changes are saved automatically.", role="muted"))
         column.addSpacing(6)
         column.addWidget(self._card("Downloads", [
@@ -129,6 +148,9 @@ class SettingsPage(QWidget):
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.addWidget(scroll)
+
+    def _update_back_icon(self) -> None:
+        self._back_button.setIcon(make_icon("back-chevron", self._theme.palette.text_muted, 18))
 
     @staticmethod
     def _button(text: str, variant: str | None = None) -> QPushButton:

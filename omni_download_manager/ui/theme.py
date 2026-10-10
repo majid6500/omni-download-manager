@@ -77,38 +77,82 @@ QLabel[role="muted"] { color: $text_muted; }
 QLabel[role="faint"] { color: $text_faint; }
 QLabel[role="error"] { color: $danger; }
 
-QWidget#Sidebar { background: $sidebar; border-right: 1px solid $border; }
-QLabel#AppName { font-size: 13pt; font-weight: 600; }
+QWidget#BottomNavigation { background: $sidebar; border-top: 1px solid $border; }
 
-QFrame#Card { background: $surface; border: 1px solid $accent; border-radius: 12px; }
+QFrame#Toolbar { background: $bg; border-bottom: 1px solid $border; }
+QFrame#ToolbarSeparator { background: $border; border: none; min-width: 1px; max-width: 1px; min-height: 24px; max-height: 24px; }
+QLabel#SelectionCount { color: $text_muted; }
+
+QFrame#Card { background: $surface; border: 1px solid $border; border-radius: 12px; }
 QFrame#Divider { background: $border; border: none; min-height: 1px; max-height: 1px; }
 
 QPushButton {
-    background: $surface_raised; border: 1px solid $accent; border-radius: 8px;
-    padding: 8px 16px; font-weight: 500;
+    background: $surface_raised; border: 1px solid $border; border-radius: 8px;
+    padding: 8px 16px; font-weight: 500; color: $text;
 }
-QPushButton:hover { background: $surface_hover; border-color: $accent_hover; }
-QPushButton:pressed { background: $border; border-color: $accent_pressed; }
-QPushButton:disabled { color: $text_faint; }
-QPushButton[variant="primary"] { background: $accent; border-color: $accent; color: $accent_text; }
+QPushButton:hover { background: $surface_hover; border-color: $border_strong; }
+QPushButton:pressed { background: $surface; border-color: $border_strong; }
+QPushButton:disabled { background: $surface; border-color: $border; color: $text_faint; }
+QPushButton:focus { border-color: $accent; }
+QPushButton[variant="primary"] { background: $accent; border: 1px solid $accent; color: $accent_text; }
 QPushButton[variant="primary"]:hover { background: $accent_hover; border-color: $accent_hover; }
 QPushButton[variant="primary"]:pressed { background: $accent_pressed; border-color: $accent_pressed; }
+QPushButton[variant="primary"]:disabled {
+    background: $surface_raised; border-color: $border; color: $text_faint;
+}
 QPushButton[variant="danger"] { background: $danger; border-color: $danger; color: #FFFFFF; }
 QPushButton[variant="danger"]:hover { background: $danger; border-color: $text_muted; }
+QPushButton[variant="danger"]:disabled {
+    background: $surface_raised; border-color: $border; color: $text_faint;
+}
 QPushButton[variant="ghost"] { background: transparent; border-color: transparent; }
 QPushButton[variant="ghost"]:hover { background: $surface_hover; }
-QPushButton[variant="segment"] { background: transparent; border: 1px solid $accent; padding: 7px 18px; }
-QPushButton[variant="segment"]:hover { border-color: $accent_hover; }
+QPushButton[variant="ghost"]:disabled { background: transparent; color: $text_faint; }
+QPushButton[variant="segment"] { background: transparent; border: 1px solid $border; padding: 7px 18px; }
+QPushButton[variant="segment"]:hover { border-color: $border_strong; }
 QPushButton[variant="segment"]:checked {
     background: $accent_soft; border-color: $accent; color: $accent;
 }
+QPushButton[variant="segment"]:disabled { background: transparent; border-color: $border; color: $text_faint; }
+
+/* Icon-only buttons of the fixed toolbar. */
+QPushButton[variant="tool"], QPushButton[variant="tool-primary"], QPushButton[variant="tool-plain"] {
+    background: transparent; border: 1px solid transparent; border-radius: 8px;
+    padding: 0; min-width: 46px; min-height: 46px;
+}
+QPushButton[variant="tool"]:hover { background: $surface_hover; border-color: $border; }
+QPushButton[variant="tool"]:pressed { background: $surface_raised; border-color: $border_strong; }
+QPushButton[variant="tool"]:focus { border-color: $accent; }
+QPushButton[variant="tool"]:disabled { background: transparent; border-color: transparent; }
+QPushButton[variant="tool-primary"] { background: $accent; border-color: $accent; }
+QPushButton[variant="tool-primary"]:hover { background: $accent_hover; border-color: $accent_hover; }
+QPushButton[variant="tool-primary"]:pressed { background: $accent_pressed; border-color: $accent_pressed; }
+QPushButton[variant="tool-primary"]:disabled {
+    background: $surface_raised; border-color: $border;
+}
+QPushButton[variant="tool-plain"]:hover,
+QPushButton[variant="tool-plain"]:pressed,
+QPushButton[variant="tool-plain"]:focus,
+QPushButton[variant="tool-plain"]:disabled {
+    background: transparent; border-color: transparent;
+}
+QPushButton[variant="back"] {
+    background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 0;
+}
+QPushButton[variant="back"]:hover { background: $surface_hover; border-color: transparent; }
+QPushButton[variant="back"]:pressed { background: $surface_raised; border-color: transparent; }
+QPushButton[variant="back"]:focus { border-color: transparent; }
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
-    background: $input; border: 1px solid $accent; border-radius: 8px; padding: 8px 12px;
+    background: $input; border: 1px solid $border; border-radius: 8px; padding: 8px 12px;
+    color: $text;
     selection-background-color: $accent; selection-color: $accent_text;
 }
-QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover { border-color: $accent_hover; }
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover { border-color: $border_strong; }
 QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus { border-color: $accent; }
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+    border-color: $border; color: $text_faint;
+}
 QLineEdit:read-only { color: $text_muted; }
 QSpinBox::up-button, QSpinBox::down-button { width: 0; border: none; }
 QComboBox::drop-down { border: none; width: 24px; }

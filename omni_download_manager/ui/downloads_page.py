@@ -1,15 +1,15 @@
-"""The main page: header, download list and empty state."""
+"""The main page: fixed toolbar, header controls, download list and empty state."""
 
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QComboBox,
     QLabel,
     QLineEdit,
     QPushButton,
+    QSizePolicy,
     QStackedLayout,
     QVBoxLayout,
     QWidget,
@@ -28,6 +28,7 @@ from omni_download_manager.ui.models import (
 )
 from omni_download_manager.ui.presentation import is_indeterminate
 from omni_download_manager.ui.theme import ThemeManager
+from omni_download_manager.ui.toolbar import Toolbar
 from omni_download_manager.ui.widgets import make_label
 from omni_download_manager.utils.formatting import format_speed
 
@@ -39,8 +40,17 @@ _EMPTY_TEXT = {
 }
 
 
+def make_icon_label(icon_name: str) -> QLabel:
+    """A small icon-only label used as a visual prefix for a header control."""
+    label = QLabel()
+    label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+    label.setProperty("iconName", icon_name)
+    return label
+
+
 class DownloadsPage(QWidget):
     addRequested = Signal()
+    settingsRequested = Signal()
     actionRequested = Signal(str, str)
     bulkActionRequested = Signal(str, object)
     contextMenuRequested = Signal(str, QPoint)
@@ -53,19 +63,28 @@ class DownloadsPage(QWidget):
         self._proxy.setSourceModel(model)
 
         self._title = make_label(ViewFilter.ALL.title, name="PageTitle")
+        self._title.setMinimumWidth(0)  # lets the header shrink instead of clipping
+        self._title.setWordWrap(True)  # wraps rather than pushing the controls out
         self._subtitle = make_label(role="muted")
-        self._add_button = QPushButton("  Add download")
-        self._add_button.setProperty("variant", "primary")
-        self._add_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._add_button.setMinimumHeight(40)
-        self._add_button.setShortcut("Ctrl+N")
-        self._add_button.clicked.connect(self.addRequested)
+        # The subtitle is metadata: it may clip in a very narrow window rather
+        # than force the whole header (and the window minimum) to grow.
+        self._subtitle.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        # The fixed action bar: always visible, driven by the current selection.
+        self._toolbar = Toolbar(theme)
+        self._toolbar.addRequested.connect(self.addRequested)
+        self._toolbar.settingsRequested.connect(self.settingsRequested)
+        self._toolbar.actionRequested.connect(self.actionRequested)
+        self._toolbar.bulkActionRequested.connect(self.bulkActionRequested)
 
         self._search = QLineEdit()
         self._search.setPlaceholderText("Search filename or URL")
         self._search.setClearButtonEnabled(True)
         self._search.setFixedWidth(240)
+        self._search.setMinimumWidth(150)  # shrink before the sort controls clip
+        self._search.setAccessibleName("Search downloads")
         self._search.textChanged.connect(self._on_search_changed)
+
         self._category = QComboBox()
         self._category.addItem("All file types", None)
         for category in FileCategory:
@@ -75,7 +94,9 @@ class DownloadsPage(QWidget):
         self._category.currentIndexChanged.connect(
             lambda: self._on_category_changed(self._category.currentData())
         )
-        self._category.setFixedWidth(140)
+        self._category.setFixedWidth(150)
+        self._category.setMinimumWidth(125)
+
         self._sort = QComboBox()
         for mode in DownloadSort:
             self._sort.addItem(mode.title, mode)
@@ -83,30 +104,19 @@ class DownloadsPage(QWidget):
             lambda: self._proxy.set_sort_mode(self._sort.currentData())
         )
         self._sort.setFixedWidth(150)
+        self._sort.setMinimumWidth(125)
 
-        self._selection_count = make_label(role="muted")
-        # Cached so progress updates do not rebuild the bulk action state.
-        self._bulk_signature: tuple | None = None
-        self._bulk_pause = QPushButton("Pause")
-        self._bulk_resume = QPushButton("Resume")
-        self._bulk_cancel = QPushButton("Cancel")
-        self._bulk_remove = QPushButton("Remove")
-        for button in (self._bulk_pause, self._bulk_resume, self._bulk_cancel, self._bulk_remove):
-            button.setCursor(Qt.CursorShape.PointingHandCursor)
-            button.setVisible(False)
-        self._bulk_pause.clicked.connect(lambda: self._run_bulk_action("pause"))
-        self._bulk_resume.clicked.connect(lambda: self._run_bulk_action("resume"))
-        self._bulk_cancel.clicked.connect(lambda: self._run_bulk_action("cancel"))
-        self._bulk_remove.clicked.connect(lambda: self._run_bulk_action("remove"))
+        self._category_icon = make_icon_label("filter")
+        self._sort_icon = make_icon_label("sort")
 
         self._view = DownloadListView(theme)
         self._view.setModel(self._proxy)
         self._view.actionRequested.connect(self.actionRequested)
         self._view.customContextMenuRequested.connect(self._on_context_menu)
-        self._view.selectionModel().selectionChanged.connect(self._update_bulk_actions)
-        self._proxy.modelReset.connect(self._update_bulk_actions)
-        self._proxy.rowsInserted.connect(self._update_bulk_actions)
-        self._proxy.rowsRemoved.connect(self._update_bulk_actions)
+        self._view.selectionModel().selectionChanged.connect(self._on_selection_changed)
+        self._proxy.modelReset.connect(self._on_selection_changed)
+        self._proxy.rowsInserted.connect(self._on_selection_changed)
+        self._proxy.rowsRemoved.connect(self._on_selection_changed)
 
         self._empty_icon = QLabel()
         self._empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -139,26 +149,28 @@ class DownloadsPage(QWidget):
         titles.addWidget(self._title)
         titles.addWidget(self._subtitle)
         header = QHBoxLayout()
+        header.setSpacing(8)
         header.addLayout(titles, 1)
-        header.addWidget(self._search, 0, Qt.AlignmentFlag.AlignTop)
-        header.addWidget(self._category, 0, Qt.AlignmentFlag.AlignTop)
-        header.addWidget(self._sort, 0, Qt.AlignmentFlag.AlignTop)
-        header.addWidget(self._add_button, 0, Qt.AlignmentFlag.AlignTop)
-        bulk = QHBoxLayout()
-        bulk.setSpacing(8)
-        bulk.addWidget(self._selection_count)
-        bulk.addWidget(self._bulk_pause)
-        bulk.addWidget(self._bulk_resume)
-        bulk.addWidget(self._bulk_cancel)
-        bulk.addWidget(self._bulk_remove)
-        bulk.addStretch(1)
+        header.addWidget(self._search)
+        header.addWidget(self._category_icon)
+        header.addWidget(self._category)
+        header.addWidget(self._sort_icon)
+        header.addWidget(self._sort)
+
+        content = QVBoxLayout()
+        content.setSpacing(16)
+        content.addLayout(header)
+        content.addLayout(self._stack, 1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(32, 28, 20, 12)
-        layout.setSpacing(18)
-        layout.addLayout(header)
-        layout.addLayout(bulk)
-        layout.addLayout(self._stack, 1)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._toolbar)
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(24, 18, 24, 10)
+        body_layout.addLayout(content)
+        layout.addWidget(body, 1)
 
         for signal in (model.dataChanged, model.rowsInserted, model.rowsRemoved, model.modelReset):
             signal.connect(self.refresh)
@@ -184,47 +196,17 @@ class DownloadsPage(QWidget):
         self._proxy.set_category_filter(category)
         self.refresh()
 
-    def _selected_item_ids(self) -> list[str]:
+    # ------------------------------------------------------------- selection
+
+    def _selected_items(self) -> list[DownloadItem]:
         return [
-            item.id
+            item
             for index in self._view.selectionModel().selectedRows()
             if (item := self._view.item_at(index)) is not None
         ]
 
-    def _run_bulk_action(self, action: str) -> None:
-        item_ids = self._selected_item_ids()
-        if item_ids:
-            self.bulkActionRequested.emit(action, item_ids)
-
-    def _update_bulk_actions(self, *_args) -> None:
-        item_ids = self._selected_item_ids()
-        selected = bool(item_ids)
-        selected_items = [self._view.item_at(index) for index in self._view.selectionModel().selectedRows()]
-        selected_items = [item for item in selected_items if item is not None]
-        # The buttons depend on which items are selected and their state, never on
-        # progress ticks, so the work is skipped while that has not changed.
-        signature = tuple((item.id, item.status, item.resumable) for item in selected_items)
-        if signature == self._bulk_signature:
-            return
-        self._bulk_signature = signature
-        self._selection_count.setText(f"{len(item_ids)} selected" if selected else "")
-        can_pause = any(
-            (item.is_active or item.status is DownloadStatus.QUEUED) and item.resumable is not False
-            for item in selected_items
-        )
-        can_resume = any(item.status in {
-            DownloadStatus.PENDING, DownloadStatus.PAUSED, DownloadStatus.FAILED, DownloadStatus.CANCELLED
-        } for item in selected_items)
-        can_cancel = any(item.status not in (DownloadStatus.COMPLETED, DownloadStatus.CANCELLED)
-                         for item in selected_items)
-        self._bulk_pause.setVisible(selected)
-        self._bulk_resume.setVisible(selected)
-        self._bulk_cancel.setVisible(selected)
-        self._bulk_remove.setVisible(selected)
-        self._bulk_pause.setEnabled(can_pause)
-        self._bulk_resume.setEnabled(can_resume)
-        self._bulk_cancel.setEnabled(can_cancel)
-        self._bulk_remove.setEnabled(selected)
+    def _on_selection_changed(self, *_args) -> None:
+        self._toolbar.set_selection(self._selected_items())
 
     def _on_context_menu(self, pos: QPoint) -> None:
         index = self._view.indexAt(pos)
@@ -235,9 +217,11 @@ class DownloadsPage(QWidget):
 
     def _refresh_icons(self) -> None:
         palette = self._theme.palette
-        self._add_button.setIcon(make_icon("plus", palette.accent_text, 18))
         self._empty_button.setIcon(make_icon("plus", palette.accent_text, 18))
         self._empty_icon.setPixmap(icon_pixmap("inbox", palette.text_faint, 56, self.devicePixelRatioF()))
+        dpr = self.devicePixelRatioF()
+        for label in (self._category_icon, self._sort_icon):
+            label.setPixmap(icon_pixmap(label.property("iconName"), palette.accent, 16, dpr))
 
     def refresh(self, *_args) -> None:
         items: list[DownloadItem] = [
@@ -277,4 +261,6 @@ class DownloadsPage(QWidget):
                     parts.append(f"↓ {format_speed(speed)}")
             self._subtitle.setText("  ·  ".join(parts))
         self._view.set_animated(any(is_indeterminate(i) for i in items))
-        self._update_bulk_actions()
+        # Status can change without the selection changing, so the toolbar follows
+        # every refresh: it must always match what a click would actually do.
+        self._on_selection_changed()

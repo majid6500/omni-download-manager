@@ -107,6 +107,8 @@ class DownloadManager:
         self._listeners: list[Listener] = []
         self._last_persisted: dict[str, float] = {}
         self._shutting_down = False
+        self._shutdown_ready_to_close = False
+        self._repository_closed = False
         self._scheduler_stop = threading.Event()
         self._scheduler_thread = threading.Thread(
             target=self._run_scheduler,
@@ -206,8 +208,10 @@ class DownloadManager:
         logger.info("Loaded %d download(s)", len(self._items))
 
     def shutdown(self, timeout: float = 8.0) -> None:
-        """Pause every running transfer, wait briefly for the workers, then save and close."""
+        """Request pauses, wait briefly, and close storage after workers have stopped."""
         with self._locked():
+            if self._repository_closed:
+                return
             self._shutting_down = True
             self._scheduler_stop.set()
             workers = dict(self._workers)
@@ -222,13 +226,10 @@ class DownloadManager:
             for item_id, worker in self._workers.items():
                 if worker.thread.is_alive():
                     logger.warning("Worker for %s did not stop in time", item_id)
-                    item = self._items.get(item_id)
-                    if item is not None and item.status in ACTIVE_STATUSES:
-                        item.transition_to(DownloadStatus.PAUSED)
             for item in self._items.values():
                 self._persist(item)
-        self._repository.close()
-        logger.info("Download manager shut down")
+            self._shutdown_ready_to_close = True
+        self._close_repository_if_idle()
 
     # ---------------------------------------------------------------- commands
 
@@ -286,6 +287,31 @@ class DownloadManager:
                     f"This download is {item.status.value} and can't be started.",
                     detail=f"start() from {item.status.value}",
                 )
+            item.scheduled_at = None
+            self._start_item(item)
+
+    def restart(self, item_id: str) -> None:
+        """Discard a failed or cancelled transfer and start it again from byte zero."""
+        with self._locked():
+            item = self._require(item_id)
+            if item_id in self._workers:
+                logger.debug("Restart ignored for %s: already running", item_id)
+                return
+            if item.status not in (DownloadStatus.FAILED, DownloadStatus.CANCELLED):
+                raise InvalidOperationError(
+                    f"This download is {item.status.value} and can't be restarted.",
+                    detail=f"restart() from {item.status.value}",
+                )
+            if item.status is DownloadStatus.FAILED:
+                item.transition_to(DownloadStatus.CANCELLED)
+            _clear_transfer_artifacts(item)
+            item.downloaded_bytes = 0
+            item.transfer_mode = None
+            item.multipart_segments_json = None
+            item.segment_fill = None
+            item.segment_retries = None
+            item.segment_stalled = None
+            item.error_message = None
             item.scheduled_at = None
             self._start_item(item)
 
@@ -468,6 +494,8 @@ class DownloadManager:
                     self._start_queued()
                 except Exception:
                     logger.exception("Could not continue the queue for %s", item_id)
+        finally:
+            self._close_repository_if_idle()
 
     def _finish(
         self,
@@ -652,6 +680,18 @@ class DownloadManager:
         except PersistenceError:
             # Losing a progress write must not abort a running download.
             logger.exception("Could not save download %s", item.id)
+
+    def _close_repository_if_idle(self) -> None:
+        with self._locked():
+            if (
+                not self._shutdown_ready_to_close
+                or self._workers
+                or self._repository_closed
+            ):
+                return
+            self._repository.close()
+            self._repository_closed = True
+            logger.info("Download manager shut down")
 
 
 class _Observer:
