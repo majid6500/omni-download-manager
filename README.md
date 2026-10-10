@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.1.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
+  <b>Version 0.2.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
 </p>
 
 ---
@@ -154,7 +154,7 @@ ODM is distributed in two ways: a portable folder and a Windows Setup installer.
 
 ### Setup installer
 
-The Inno Setup script `omni download manager v 0.1.0.iss` packages the same folder into `installer\Omni-Download-Manager-Setup.exe`. See [Build a Windows Release](#-build-a-windows-release).
+The Inno Setup script `omni download manager v 0.2.0.iss` packages the same folder into `installer\Omni-Download-Manager-Setup.exe`. See [Build a Windows Release](#-build-a-windows-release).
 
 ---
 
@@ -256,7 +256,7 @@ The build produces a folder-based portable application containing the executable
 With [Inno Setup 6 or 7](https://jrsoftware.org/isinfo.php) installed:
 
 ```bat
-"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.1.0.iss"
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.2.0.iss"
 ```
 
 The script reads `dist\Omni Download Manager\*` (relative to the repository root, so it works from any checkout) and writes `installer\Omni-Download-Manager-Setup.exe`.
@@ -280,7 +280,7 @@ The project is intentionally focused on its current core feature set. The follow
 
 ## 🗺️ Project Status
 
-**Omni Download Manager 0.1.0** is an early but functional release focused on a stable download workflow, persistent history, queue management, scheduling, and a polished desktop UI.
+**Omni Download Manager 0.2.0** adds adaptive multi-connection downloads and a redesigned desktop interface to the existing download workflow.
 
 The architecture is deliberately modular so future versions can extend the transfer layer and application features without requiring a complete rewrite of the UI or storage system.
 
@@ -379,7 +379,7 @@ Omni Download Manager.exe
 
 ### نصب‌کنندهٔ Setup
 
-اسکریپت Inno Setup با نام `omni download manager v 0.1.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
+اسکریپت Inno Setup با نام `omni download manager v 0.2.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
 
 ## 🧪 تست‌ها
 
@@ -389,7 +389,7 @@ Omni Download Manager.exe
 python -m unittest discover -s tests -t .
 ```
 
-در آخرین اجرای تأییدشده، **هر ۱۱۷ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و fallback آن، مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، انتشار رویدادها خارج از قفل مدیر، فیلتر، جست‌وجو، ذخیره‌سازی، رفتار انتخاب در فهرست و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
+در آخرین اجرای تأییدشده، **هر ۱۴۲ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و fallback آن، مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، انتشار رویدادها خارج از قفل مدیر، فیلتر، جست‌وجو، ذخیره‌سازی، رفتار انتخاب در فهرست و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
 
 تست‌های دانلود از یک HTTP server محلی استفاده می‌کنند و به سرویس دانلود خارجی وابسته نیستند.
 
@@ -448,7 +448,7 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 با نصب بودن [Inno Setup نسخهٔ ۶ یا ۷](https://jrsoftware.org/isinfo.php):
 
 ```bat
-"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.1.0.iss"
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.2.0.iss"
 ```
 
 اسکریپت محتوای `dist\Omni Download Manager\*` را می‌خواند (مسیرها نسبی هستند و از هر checkout کار می‌کنند) و خروجی را در `installer\Omni-Download-Manager-Setup.exe` می‌نویسد.
@@ -457,7 +457,7 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 
 ## ⚠️ محدودیت‌های فعلی
 
-در نسخهٔ `0.1.0` موارد زیر هنوز پیاده‌سازی نشده‌اند:
+در نسخهٔ `0.2.0` موارد زیر هنوز پیاده‌سازی نشده‌اند:
 
 - دانلود FTP.
 - پشتیبانی از BitTorrent.
@@ -474,13 +474,13 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 
 ## 🗺️ وضعیت پروژه
 
-نسخهٔ **0.1.0** یک نسخهٔ اولیه اما کاربردی از Omni Download Manager است که روی یک هستهٔ دانلود پایدار، مدیریت صف، زمان‌بندی، تاریخچهٔ دائمی و رابط کاربری مرتب تمرکز دارد.
+نسخهٔ **0.2.0** با دانلود چنداتصالی تطبیقی و رابط کاربری بازطراحی‌شده، بر پایهٔ هستهٔ پایدار دانلود، مدیریت صف، زمان‌بندی و تاریخچهٔ دائمی ساخته شده است.
 
 ساختار ماژولار پروژه اجازه می‌دهد در نسخه‌های بعدی امکانات بیشتری به موتور دانلود و خود برنامه اضافه شود، بدون اینکه نیاز به بازنویسی کامل رابط کاربری یا سیستم ذخیره‌سازی باشد.
 
 ---
 
 <p align="center">
-  <strong>Omni Download Manager · v0.1.0</strong><br>
+  <strong>Omni Download Manager · v0.2.0</strong><br>
   Built with Python & PySide6 · Made for Windows
 </p>

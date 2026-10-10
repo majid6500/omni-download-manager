@@ -1,5 +1,5 @@
 #define MyAppName "Omni Download Manager"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.2.0"
 #define MyAppPublisher "Omni Download Manager"
 #define MyAppExeName "Omni Download Manager.exe"
 
