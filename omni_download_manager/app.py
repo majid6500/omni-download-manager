@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtCore import QLockFile
 from PySide6.QtGui import QFont
@@ -11,6 +12,8 @@ from PySide6.QtWidgets import QApplication
 
 from omni_download_manager.config.paths import resolve_app_paths
 from omni_download_manager.config.settings import SettingsStore
+from omni_download_manager.browser_integration.ipc import BrowserIpcServer
+from omni_download_manager.browser_integration.native_messaging import run_native_host
 from omni_download_manager.constants import APP_NAME, VERSION
 from omni_download_manager.engine.adaptive_http_downloader import AdaptiveHttpDownloader
 from omni_download_manager.services.download_manager import DownloadManager
@@ -26,14 +29,28 @@ logger = logging.getLogger("omni_download_manager.app")
 
 
 def main(argv: list[str] | None = None) -> int:
+    arguments = list(argv if argv is not None else sys.argv)
+    native_host_mode = (
+        "--native-messaging-host" in arguments[1:]
+        or bool(arguments)
+        and Path(arguments[0]).stem.casefold() == "odm native host"
+    )
+    listener_requested = "--browser-request-listener" in arguments[1:]
+    arguments = [
+        arg for arg in arguments
+        if arg not in ("--native-messaging-host", "--browser-request-listener")
+    ]
+
     paths = resolve_app_paths()
     paths.ensure()
     setup_logging(paths.log_dir)
     install_exception_hooks()
     logger.info("Starting %s %s (data dir: %s)", APP_NAME, VERSION, paths.data_dir)
+    if native_host_mode:
+        return run_native_host(paths)
 
     set_app_user_model_id()
-    app = QApplication(argv if argv is not None else sys.argv)
+    app = QApplication(arguments)
     app.setApplicationName(APP_NAME)
     app.setApplicationVersion(VERSION)
     app.setWindowIcon(logo_icon())
@@ -49,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
     lock = QLockFile(str(paths.lock_file))
     # QLockFile detects locks left behind by a crashed process, so no manual cleanup is needed.
     if not lock.tryLock(100):
+        if listener_requested:
+            return 0
         show_information(theme, None, APP_NAME, f"{APP_NAME} is already running.")
         return 0
 
@@ -63,6 +82,16 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow(manager, settings, theme, paths)
     window.show()
+    try:
+        browser_server = BrowserIpcServer(
+            paths,
+            window.add_browser_download,
+        )
+        app.aboutToQuit.connect(browser_server.close)
+    except RuntimeError:
+        logger.exception("Could not start browser integration IPC server")
+        browser_server = None
+
     code = app.exec()
     logger.info("Exiting with code %d", code)
     lock.unlock()

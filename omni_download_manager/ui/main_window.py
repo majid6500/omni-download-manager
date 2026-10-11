@@ -155,6 +155,20 @@ class MainWindow(QMainWindow):
         if self._downloads.view_filter is ViewFilter.COMPLETED or self._downloads.view_filter is ViewFilter.FAILED:
             self._navigation.select(ViewFilter.ALL.value)
 
+    def add_browser_download(self, request: dict[str, str]) -> None:
+        current = self._settings.get()
+        self._manager.add(
+            request["url"],
+            current.download_dir,
+            request.get("filename"),
+            start=current.start_immediately,
+            referer=request.get("referer"),
+        )
+        self._navigation.select(ViewFilter.ALL.value)
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
     # ---------------------------------------------------------------- close
 
     def _restore_geometry(self) -> None:

@@ -32,6 +32,7 @@ from omni_download_manager.engine.base import (
 from omni_download_manager.engine.filenames import derive_filename, finalize_partial, reserve_partial
 from omni_download_manager.engine.http_downloader import (
     HttpDownloader,
+    apply_session_headers,
     _CONTENT_RANGE,
     _RANGE_UNSATISFIED,
     _int_or_none,
@@ -149,7 +150,12 @@ class MultiPartHttpDownloader:
 
     def _probe(self, job: DownloadJob) -> _ProbeResult | None:
         with requests.Session() as session:
-            session.headers.update({"User-Agent": self._user_agent, "Accept": "*/*"})
+            apply_session_headers(
+                session,
+                user_agent=self._user_agent,
+                referer=job.referer,
+                cookies=job.cookies,
+            )
             proxies = None if job.use_system_proxy else {"http": "", "https": ""}
             head = None
             try:
@@ -511,12 +517,11 @@ class MultiPartHttpDownloader:
         # A session per segment keeps connection state off shared, non-thread-safe
         # objects while preserving the exact headers used before.
         with requests.Session() as session:
-            session.headers.update(
-                {
-                    "User-Agent": self._user_agent,
-                    "Accept": "*/*",
-                    "Accept-Encoding": "identity",
-                }
+            apply_session_headers(
+                session,
+                user_agent=self._user_agent,
+                referer=job.referer,
+                cookies=job.cookies,
             )
             return self._transfer_segment(
                 session, job, total_bytes, segment, control, stop_event,

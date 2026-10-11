@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.2.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
+  <b>Version 0.3.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
 </p>
 
 ---
@@ -87,7 +87,7 @@ The project is designed as a modular foundation that can grow into a more capabl
 
 ## 🖼️ Screenshots
 
-The gallery below highlights the interface redesign introduced in **v0.2.0**.
+The gallery below highlights the interface redesign introduced in **v0.3.0**.
 
 <!-- Keep screenshots free of personal usernames, paths, and private filenames. -->
 <p align="center">
@@ -98,10 +98,10 @@ The gallery below highlights the interface redesign introduced in **v0.2.0**.
 </p>
 
 <p align="center">
-  <strong>Redesigned interface · v0.2.0</strong>
+  <strong>Redesigned interface · v0.3.0</strong>
 </p>
 <p align="center">
-  <img src="assets/ui-v0.2.0.png" alt="Omni Download Manager redesigned interface in version 0.2.0" width="900">
+  <img src="assets/ui-v0.2.0.png" alt="Omni Download Manager redesigned interface in version 0.3.0" width="900">
 </p>
 
 ---
@@ -173,7 +173,40 @@ ODM is distributed in two ways: a portable folder and a Windows Setup installer.
 
 ### Setup installer
 
-The Inno Setup script `omni download manager v 0.2.0.iss` packages the same folder into `installer\Omni-Download-Manager-Setup.exe`. See [Build a Windows Release](#-build-a-windows-release).
+The Inno Setup script `omni download manager v 0.3.0.iss` packages the same folder into `installer\Omni-Download-Manager-Setup.exe`. See [Build a Windows Release](#-build-a-windows-release).
+
+---
+
+## 🌐 Browser Integration
+
+The optional Chromium companion sends direct browser-visible HTTP/HTTPS links to the existing desktop download queue. It does not download files itself.
+
+### Supported browsers and installation
+
+- Google Chrome and Microsoft Edge (Chromium).
+- The companion extension is a Manifest V3 extension in `browser_extension\`.
+- Browser extensions are installed separately. Use the official Chrome Web Store or Microsoft Edge Add-ons listing when published. For development, load `browser_extension\` as an unpacked extension from the browser's extensions page.
+- Install or update the desktop application with the existing Setup installer. When prompted, enter the extension's 32-character ID for each browser; leave a field blank to skip it. The installer registers a per-machine Native Messaging Host and does not force-install or silently sideload the extension.
+- Restart the browser after installing the extension and desktop host. The extension popup reports whether the Native Messaging host is reachable; application Settings show which browser hosts are registered.
+- To update the integration, install the application update and extension update through their normal channels. To remove the host registration, uninstall the desktop application. Remove the extension separately in the browser.
+
+### How it works
+
+```text
+Browser context menu → MV3 extension → Native Messaging Host
+  → per-user Qt local IPC → running desktop app → DownloadManager.add()
+  → existing queue, SQLite history and adaptive HTTP engine
+```
+
+The context menu is available for links, images, video, and audio on HTTP/HTTPS pages. The extension passes the direct resource URL, a suggested filename, and the referring page's origin. The desktop app validates the request and uses the configured download folder, start preference, proxy, speed limit, queue, and existing download engine. The referring origin is stored with the download so HTTP requests can use it when required.
+
+### Troubleshooting and limitations
+
+- **Native host unavailable:** confirm the desktop Setup installed successfully, the correct extension ID was entered, and the browser was restarted. Re-run the Setup installer to repair or change the ID.
+- **App not running:** the Native Messaging Host starts the installed desktop application, which then accepts the request through its single-instance IPC.
+- Only direct HTTP/HTTPS URLs exposed to the browser extension are accepted. Browser-only `blob:` URLs, DRM/protected streams, paywalls, authenticated session cookies, and resources requiring custom headers are not supported; the integration does not bypass site protections.
+- Official store publishing requires a publisher account and review. Until published, installation requires loading the development extension manually.
+- Development tests cover message validation, Native Messaging framing, IPC, and SQLite migration. Run all tests with `python -m unittest discover -s tests -t .`.
 
 ---
 
@@ -185,7 +218,7 @@ Run the complete test suite with:
 python -m unittest discover -s tests -t .
 ```
 
-The current verified suite contains **142 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, completion notifications, and icon loading.
+The current verified suite contains **148 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, browser request validation and IPC, completion notifications, and icon loading.
 
 Download-related tests use a **local HTTP server**, so they do not depend on an external download service.
 
@@ -217,14 +250,16 @@ Download-related tests use a **local HTTP server**, so they do not depend on an 
 Main project areas:
 
 ```text
-omni_download_manager/
-├── core/        Domain models, states, errors and file categories
-├── engine/      Adaptive HTTP download strategies, segments, speed and filenames
-├── storage/     SQLite repository and migrations
-├── config/      Paths and application settings
-├── services/    Queue, scheduling, retries, workers and orchestration
-├── ui/          PySide6 interface, dialogs, views and themes
-└── utils/       Formatting, validation, logging and OS integration
+project/
+├── omni_download_manager/
+│   ├── core/        Domain models, states, errors and file categories
+│   ├── engine/      Adaptive HTTP download strategies, segments, speed and filenames
+│   ├── storage/     SQLite repository and migrations
+│   ├── config/      Paths and application settings
+│   ├── services/    Queue, scheduling, retries, workers and orchestration
+│   ├── ui/          PySide6 interface, dialogs, views and themes
+│   └── browser_integration/ Native Messaging and local IPC
+└── browser_extension/        Chromium Manifest V3 companion
 ```
 
 The download engine is separated from the UI and persistence layers. Worker threads perform downloads independently, while Qt events/signals carry state changes back to the GUI layer.
@@ -294,12 +329,13 @@ The project is intentionally focused on its current core feature set. The follow
 - Account login, cookies, or configurable custom request headers.
 - A dedicated manual-proxy configuration interface; the current option uses the system proxy.
 - Resuming a download from a server that refuses HTTP `Range` requests.
+- Browser integration currently supports direct HTTP/HTTPS URLs only; official Chrome Web Store and Edge Add-ons listings are not yet published.
 
 ---
 
 ## 🗺️ Project Status
 
-**Omni Download Manager 0.2.0** adds adaptive multi-connection downloads and a redesigned desktop interface to the existing download workflow.
+**Omni Download Manager 0.3.0** adds adaptive multi-connection downloads and a redesigned desktop interface to the existing download workflow.
 
 The architecture is deliberately modular so future versions can extend the transfer layer and application features without requiring a complete rewrite of the UI or storage system.
 
@@ -355,7 +391,7 @@ describing the project as open source or redistributing it.
 
 ## 🖥️ رابط کاربری و تصاویر
 
-رابط کاربری با **PySide6 / Qt 6** ساخته شده است. در نسخهٔ `0.2.0`، چیدمان ابزارها بازطراحی شده و پیمایش صفحات به نوار پایینی منتقل شده است.
+رابط کاربری با **PySide6 / Qt 6** ساخته شده است. در نسخهٔ `0.3.0`، چیدمان ابزارها بازطراحی شده و پیمایش صفحات به نوار پایینی منتقل شده است.
 
 <!-- اسکرین‌شات‌ها نباید نام کاربری ویندوز، مسیرهای شخصی یا نام فایل‌های خصوصی را نمایش دهند. -->
 <p align="center">
@@ -369,7 +405,7 @@ describing the project as open source or redistributing it.
   <strong>رابط بازطراحی‌شده · نسخهٔ 0.2.0</strong>
 </p>
 <p align="center">
-  <img src="assets/ui-v0.2.0.png" alt="رابط بازطراحی‌شده Omni Download Manager در نسخه 0.2.0" width="900">
+  <img src="assets/ui-v0.2.0.png" alt="رابط بازطراحی‌شده Omni Download Manager در نسخه 0.3.0" width="900">
 </p>
 
 ## 🚀 اجرای پروژه در ویندوز
@@ -413,6 +449,30 @@ Omni Download Manager.exe
 
 اسکریپت Inno Setup با نام `omni download manager v 0.2.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
 
+## 🌐 اتصال به مرورگر
+
+افزونهٔ اختیاری Chromium فقط لینک مستقیم HTTP/HTTPS را به صف برنامهٔ دسکتاپ می‌فرستد و خودش دانلود انجام نمی‌دهد.
+
+- مرورگرهای هدف Google Chrome و Microsoft Edge مبتنی بر Chromium هستند.
+- فایل‌های افزونهٔ Manifest V3 در پوشهٔ `browser_extension\` قرار دارند. افزونه باید جداگانه از فروشگاه رسمی نصب شود؛ برای توسعه می‌توان پوشه را از صفحهٔ افزونه‌های مرورگر به‌صورت unpacked بارگذاری کرد.
+- هنگام نصب یا به‌روزرسانی برنامه با Setup، شناسهٔ ۳۲کاراکتری افزونه را برای هر مرورگر وارد کنید. نصب‌کننده Native Messaging Host را ثبت می‌کند، اما افزونه را مخفیانه نصب نمی‌کند.
+- پس از نصب افزونه و برنامه، مرورگر را دوباره اجرا کنید. پنجرهٔ افزونه اتصال Native Host را نشان می‌دهد و بخش تنظیمات برنامه وضعیت ثبت میزبان هر مرورگر را نمایش می‌دهد.
+- برنامهٔ دسکتاپ را حذف کنید تا ثبت Native Host پاک شود؛ حذف افزونه باید جداگانه از خود مرورگر انجام شود.
+
+مسیر درخواست:
+
+```text
+منوی راست‌کلیک مرورگر ← افزونه ← Native Messaging Host
+← IPC محلی ویندوز ← برنامهٔ اصلی ← DownloadManager.add()
+← صف، تاریخچهٔ SQLite و موتور دانلود موجود
+```
+
+منوی افزونه برای لینک، تصویر، ویدیو و صدا در صفحات HTTP/HTTPS نمایش داده می‌شود. URL، نام پیشنهادی فایل و مبدأ صفحه به برنامه می‌رسند. برنامه از پوشه، صف، تنظیمات شبکه و موتور دانلود فعلی استفاده می‌کند.
+
+**محدودیت‌ها:** لینک‌های `blob:`، استریم‌های DRM/محافظت‌شده، Cookieهای نشست کاربر و منابع نیازمند Header سفارشی پشتیبانی نمی‌شوند؛ افزونه هیچ محدودیت امنیتی سایت را دور نمی‌زند. انتشار در فروشگاه‌ها به حساب ناشر و تأیید فروشگاه نیاز دارد و تا آن زمان نصب توسعه‌ای به‌صورت دستی انجام می‌شود.
+
+---
+
 ## 🧪 تست‌ها
 
 برای اجرای تست‌ها:
@@ -421,7 +481,7 @@ Omni Download Manager.exe
 python -m unittest discover -s tests -t .
 ```
 
-در آخرین اجرای تأییدشده، **هر ۱۴۲ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و fallback آن، مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، انتشار رویدادها خارج از قفل مدیر، فیلتر، جست‌وجو، ذخیره‌سازی، رفتار انتخاب در فهرست و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
+در آخرین اجرای تأییدشده، **هر ۱۴۸ تست با موفقیت پاس شده‌اند**. تست‌ها تشخیص و fallback در HTTP Range، صحت دانلود چندبخشی و fallback آن، مکث/ادامه، صف، retry، زمان‌بندی، بازیابی، انتشار رویدادها خارج از قفل مدیر، فیلتر، جست‌وجو، ذخیره‌سازی، اعتبارسنجی و IPC درخواست مرورگر، رفتار انتخاب در فهرست و قابلیت‌های مرتبط با رابط کاربری را بررسی می‌کنند.
 
 تست‌های دانلود از یک HTTP server محلی استفاده می‌کنند و به سرویس دانلود خارجی وابسته نیستند.
 
@@ -489,7 +549,7 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 
 ## ⚠️ محدودیت‌های فعلی
 
-در نسخهٔ `0.2.0` موارد زیر هنوز پیاده‌سازی نشده‌اند:
+در نسخهٔ `0.3.0` موارد زیر هنوز پیاده‌سازی نشده‌اند:
 
 - دانلود FTP.
 - پشتیبانی از BitTorrent.

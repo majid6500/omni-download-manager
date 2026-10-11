@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Omni Download Manager Companion",
+  "description": "Send browser downloads to Omni Download Manager.",
+  "version": "1.0.0",
+  "minimum_chrome_version": "105",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging",
+    "notifications"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_title": "Omni Download Manager",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "icons/odm-16.png",
+    "32": "icons/odm-32.png",
+    "48": "icons/odm-48.png",
+    "128": "icons/odm-128.png"
+  }
+}

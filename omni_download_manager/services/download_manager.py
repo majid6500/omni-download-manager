@@ -241,6 +241,7 @@ class DownloadManager:
         *,
         start: bool | None = None,
         scheduled_at: float | None = None,
+        referer: str | None = None,
     ) -> DownloadItem:
         clean_url = validate_url(url)
         if start is None:
@@ -264,6 +265,7 @@ class DownloadManager:
             filename=custom_name or filename_from_url(clean_url) or "download",
             filename_resolved=custom_name is not None,
             scheduled_at=scheduled_at,
+            referer=validate_url(referer) if referer else None,
         )
         with self._locked():
             self._items[item.id] = item
@@ -433,6 +435,7 @@ class DownloadManager:
             filename_resolved=item.filename_resolved,
             etag=item.etag,
             last_modified=item.last_modified,
+            referer=item.referer,
             connect_timeout=settings.connect_timeout,
             read_timeout=settings.read_timeout,
             use_system_proxy=settings.use_system_proxy,

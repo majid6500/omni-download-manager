@@ -61,4 +61,14 @@ exe = EXE(
     icon=str(root / "omni_download_manager" / "resources" / "app.ico"),
     version=version_resource,
 )
-coll = COLLECT(exe, a.binaries, a.datas, name="Omni Download Manager")
+native_host_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="ODM Native Host",
+    console=True,
+    icon=str(root / "omni_download_manager" / "resources" / "app.ico"),
+    version=version_resource,
+)
+coll = COLLECT(exe, native_host_exe, a.binaries, a.datas, name="Omni Download Manager")

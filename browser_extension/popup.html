@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Omni Download Manager</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="panel">
+      <header class="brand">
+        <img src="icons/odm-48.png" alt="" width="36" height="36">
+        <div>
+          <h1>Omni Download Manager</h1>
+          <p>Browser companion</p>
+        </div>
+      </header>
+      <section class="status" aria-live="polite">
+        <span class="status-dot" id="status-dot"></span>
+        <div>
+          <strong id="status-title">Checking connection…</strong>
+          <p id="status-message">Contacting the desktop integration.</p>
+        </div>
+      </section>
+      <p class="hint">Right-click a link, image, video, or audio resource and choose “Download with Omni Download Manager”.</p>
+      <button id="check-button" type="button">Check connection</button>
+      <p class="footnote">Downloads are handled by the desktop app. Protected streams and browser-only blob URLs are not supported.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

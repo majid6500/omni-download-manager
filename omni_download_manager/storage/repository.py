@@ -48,6 +48,9 @@ MIGRATIONS: tuple[str, ...] = (
     ALTER TABLE downloads ADD COLUMN transfer_mode TEXT;
     ALTER TABLE downloads ADD COLUMN multipart_segments_json TEXT;
     """,
+    """
+    ALTER TABLE downloads ADD COLUMN referer TEXT;
+    """,
 )
 
 
@@ -110,8 +113,8 @@ class SqliteDownloadRepository:
                         id, url, directory, filename, filename_resolved, status, total_bytes,
                         downloaded_bytes, resumable, etag, last_modified, error_message,
                         created_at, scheduled_at, completed_at, transfer_mode,
-                        multipart_segments_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        multipart_segments_json, referer
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         url=excluded.url, directory=excluded.directory,
                         filename=excluded.filename,
@@ -124,7 +127,8 @@ class SqliteDownloadRepository:
                         scheduled_at=excluded.scheduled_at,
                         completed_at=excluded.completed_at,
                         transfer_mode=excluded.transfer_mode,
-                        multipart_segments_json=excluded.multipart_segments_json
+                        multipart_segments_json=excluded.multipart_segments_json,
+                        referer=excluded.referer
                     """,
                     (
                         item.id,
@@ -144,6 +148,7 @@ class SqliteDownloadRepository:
                         item.completed_at,
                         item.transfer_mode,
                         item.multipart_segments_json,
+                        item.referer,
                     ),
                 )
         except sqlite3.Error as exc:
@@ -189,6 +194,7 @@ def _row_to_item(row: sqlite3.Row) -> DownloadItem:
         resumable=None if resumable is None else bool(resumable),
         etag=row["etag"],
         last_modified=row["last_modified"],
+        referer=row["referer"],
         error_message=row["error_message"],
         created_at=row["created_at"],
         scheduled_at=row["scheduled_at"],

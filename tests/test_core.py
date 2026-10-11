@@ -282,14 +282,14 @@ class RepositoryTests(unittest.TestCase):
             scheduled_at = time.time() + 300
             item = DownloadItem(url="http://x/a", directory="/d", filename="a", total_bytes=10,
                                 resumable=True, etag='"e"', filename_resolved=True,
-                                scheduled_at=scheduled_at)
+                                scheduled_at=scheduled_at, referer="https://example.com/")
             repo.save(item)
             item.status, item.downloaded_bytes, item.error_message = S.FAILED, 4, "boom"
             repo.save(item)
             [loaded] = repo.load_all()
             self.assertEqual((loaded.status, loaded.downloaded_bytes, loaded.error_message,
-                              loaded.resumable, loaded.etag, loaded.scheduled_at),
-                             (S.FAILED, 4, "boom", True, '"e"', scheduled_at))
+                              loaded.resumable, loaded.etag, loaded.scheduled_at, loaded.referer),
+                             (S.FAILED, 4, "boom", True, '"e"', scheduled_at, "https://example.com/"))
             self.assertEqual(loaded.speed_bps, 0)
             repo.delete(item.id)
             self.assertEqual(repo.load_all(), [])

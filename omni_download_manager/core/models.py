@@ -66,6 +66,7 @@ class DownloadItem:
     resumable: bool | None = None
     etag: str | None = None
     last_modified: str | None = None
+    referer: str | None = None
     error_message: str | None = None
     created_at: float = field(default_factory=time.time)
     scheduled_at: float | None = None

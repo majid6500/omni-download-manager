@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from omni_download_manager.config.paths import AppPaths
 from omni_download_manager.config.settings import SettingsStore
+from omni_download_manager.browser_integration.status import registered_browsers
 from omni_download_manager.core.errors import AppError
 from omni_download_manager.ui.dialogs import show_error
 from omni_download_manager.ui.icons import make_icon
@@ -96,6 +97,16 @@ class SettingsPage(QWidget):
         tools_widget.setLayout(tools_box)
         tools_box.setContentsMargins(0, 0, 0, 0)
 
+        browser_status = registered_browsers()
+        chrome_status = make_label(
+            "Native host registered" if browser_status["Chrome"] else "Not installed",
+            role="muted",
+        )
+        edge_status = make_label(
+            "Native host registered" if browser_status["Microsoft Edge"] else "Not installed",
+            role="muted",
+        )
+
         content = QWidget()
         content.setObjectName("SettingsContent")
         column = QVBoxLayout(content)
@@ -134,6 +145,10 @@ class SettingsPage(QWidget):
             ("Read timeout", "How long to wait for data before giving up.", read),
             ("Use system proxy", "Use the proxy configured by Windows or the environment.", system_proxy),
             ("Maximum total speed", "Shared by all downloads. Unlimited by default.", speed_limit),
+        ]))
+        column.addWidget(self._card("Browser Integration", [
+            ("Google Chrome", "The browser extension is installed separately.", chrome_status),
+            ("Microsoft Edge", "The browser extension is installed separately.", edge_status),
         ]))
         column.addWidget(self._card("Storage", [
             ("Application data", str(paths.data_dir), tools_widget),
