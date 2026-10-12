@@ -30,6 +30,10 @@ class NetworkError(AppError):
         self.retryable = retryable
 
 
+class IntermediatePageError(NetworkError):
+    """The URL returned an HTML page instead of a downloadable response."""
+
+
 class HttpStatusError(AppError):
     def __init__(self, status_code: int) -> None:
         super().__init__(describe_http_status(status_code), detail=f"HTTP {status_code}")

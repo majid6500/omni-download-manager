@@ -51,6 +51,17 @@ class DownloadControl:
 
 
 @dataclass(frozen=True)
+class ScopedCookie:
+    """A browser cookie restricted to the host/path for which it was issued."""
+
+    name: str
+    value: str
+    domain: str
+    path: str = "/"
+    secure: bool = False
+
+
+@dataclass(frozen=True)
 class DownloadJob:
     """Everything the engine needs to run one transfer."""
 
@@ -71,7 +82,7 @@ class DownloadJob:
     referer: str | None = None
     # Cookies already established for this transfer (e.g. by the multi-part probe's
     # redirect chain). Sent as plain name/value pairs, only for this download.
-    cookies: tuple[tuple[str, str], ...] = ()
+    cookies: tuple[ScopedCookie, ...] = ()
 
 
 @dataclass(frozen=True)

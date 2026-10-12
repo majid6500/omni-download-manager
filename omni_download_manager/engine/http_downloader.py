@@ -34,6 +34,7 @@ import urllib3
 from omni_download_manager.core.errors import (
     AppError,
     HttpStatusError,
+    IntermediatePageError,
     InvalidUrlError,
     NetworkError,
     storage_error_from_os,
@@ -46,6 +47,7 @@ from omni_download_manager.engine.base import (
     DownloadOutcome,
     OutcomeKind,
     ProgressSnapshot,
+    ScopedCookie,
     TransferMetadata,
 )
 from omni_download_manager.engine.filenames import (
@@ -56,6 +58,7 @@ from omni_download_manager.engine.filenames import (
 )
 from omni_download_manager.engine.response import ResponseVerdict, analyze_response
 from omni_download_manager.engine.speed import DownloadSpeedLimiter, SpeedMeter
+from omni_download_manager.engine.url_security import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +72,7 @@ DEFAULT_USER_AGENT = (
 _CONTENT_RANGE = re.compile(r"^\s*bytes\s+(\d+)-(\d+)/(\d+|\*)\s*$", re.IGNORECASE)
 _RANGE_UNSATISFIED = re.compile(r"^\s*bytes\s+\*/(\d+)\s*$", re.IGNORECASE)
 _MAX_RANGE_ATTEMPTS = 3
-# Redirect chains are followed automatically, but never without a bound.
+# Redirect chains are checked hop by hop and never followed without a bound.
 MAX_REDIRECTS = 20
 # One extra attempt when the first response is not the requested file: the redirect
 # chain of that attempt leaves cookies in the session, which the second one reuses.
@@ -81,7 +84,7 @@ def apply_session_headers(
     *,
     user_agent: str,
     referer: str | None = None,
-    cookies: tuple[tuple[str, str], ...] = (),
+    cookies: tuple[ScopedCookie, ...] = (),
 ) -> None:
     """Set the shared request headers everywhere a transfer talks to a server.
 
@@ -102,7 +105,14 @@ def apply_session_headers(
     if referer:
         session.headers["Referer"] = referer
     if cookies:
-        session.cookies.update(dict(cookies))
+        for cookie in cookies:
+            session.cookies.set(
+                cookie.name,
+                cookie.value,
+                domain=cookie.domain,
+                path=cookie.path,
+                secure=cookie.secure,
+            )
 
 
 def unexpected_response_error(verdict: ResponseVerdict, url: str) -> NetworkError:
@@ -111,7 +121,8 @@ def unexpected_response_error(verdict: ResponseVerdict, url: str) -> NetworkErro
         message = "The server sent a web page instead of the requested file."
     else:
         message = "The server sent an empty response instead of the requested file."
-    return NetworkError(
+    error_type = IntermediatePageError if verdict.reason == "html" else NetworkError
+    return error_type(
         message,
         detail=f"{verdict.detail} (request: {url})",
         # The same link would answer the same way; the caller decides what to do next.
@@ -246,8 +257,11 @@ class HttpDownloader:
         ``(None, offset)`` when the partial file turns out to be the whole file.
         """
         for _ in range(_MAX_RANGE_ATTEMPTS):
-            response = session.get(
+            response = request_with_safe_redirects(
+                session,
+                "GET",
                 job.url,
+                source_url=job.url,
                 headers=_range_headers(job, offset),
                 stream=True,
                 timeout=(job.connect_timeout, job.read_timeout),

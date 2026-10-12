@@ -68,6 +68,61 @@ class MultiPartEngineTests(unittest.TestCase):
         self.assertIsNotNone(recorder.metadata.multipart_state)
         self.assertGreaterEqual(len(recorder.metadata.multipart_state.segments), 2)
 
+    def test_multipart_filename_uses_content_disposition_from_final_response(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/direct"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(
+            outcome.path.name,
+            "Spider-Man-Brand-New-Day-2026-4k-DUB_1080.mp4",
+        )
+
+    def test_multipart_redirect_chain_uses_final_response_filename(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/redirect"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(
+            outcome.path.name,
+            "Spider-Man-Brand-New-Day-2026-4k-DUB_1080.mp4",
+        )
+        self.assertEqual(outcome.path.read_bytes(), PAYLOAD)
+
+    def test_multipart_redirect_chain_uses_final_url_not_intermediate_path(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/redirect-url"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "final-name.mp4")
+
+    def test_multipart_filename_star_is_decoded(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/extended"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "Café-vidéo.mp4")
+
+    def test_multipart_uses_final_url_and_adds_mime_extension(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/by-url"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "by-url.mp4")
+
+    def test_multipart_ignores_opaque_numeric_url_component(self) -> None:
+        outcome = self.engine.download(
+            self.job("/movie/4"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "download.mp4")
+
+    def test_multipart_malformed_content_disposition_falls_back_to_url(self) -> None:
+        outcome = self.engine.download(
+            self.job("/metadata/malformed.mp4"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "malformed.mp4")
+
+    def test_multipart_content_disposition_wins_over_conflicting_url(self) -> None:
+        outcome = self.engine.download(
+            self.job("/metadata/url-name.mp4"), DownloadControl(), Recorder()
+        )
+        self.assertEqual(outcome.path.name, "server-name.mp4")
+
     def test_norange_falls_back_to_single(self) -> None:
         recorder = Recorder()
         outcome = self.engine.download(self.job("/norange.bin"), DownloadControl(), recorder)

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <b>Version 0.3.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>142 Tests Passing</b>
+  <b>Version 0.3.0</b> · <b>Python + PySide6</b> · <b>Portable &amp; Setup builds</b> · <b>173 Tests Passing</b>
 </p>
 
 ---
@@ -38,6 +38,10 @@ The project is designed as a modular foundation that can grow into a more capabl
 ### Download engine
 
 - HTTP and HTTPS downloads.
+- Resolves bounded HTTP redirects and standard HTML meta/location redirects before the existing download engine runs.
+- Optionally opens JavaScript-driven intermediate pages in headless Chromium and captures the next HTTP(S) navigation for the existing engine to validate and download.
+- JavaScript resolution is opt-in: install `python -m pip install -e ".[browser]"`, then `python -m playwright install chromium`. Direct downloads and supported HTML redirects do not require Playwright.
+- Intermediate pages that require a browser but have no supported HTTP(S) download navigation fail with an actionable message. Browser-only `blob:` downloads, POST-only responses, DRM, authentication bypass, and anti-abuse challenges are not supported.
 - Streaming downloads directly to disk instead of loading the complete file into memory.
 - Automatically uses up to **4 HTTP Range connections** for eligible files when the server returns valid partial responses; otherwise it falls back to a normal download.
 - Progress percentage, downloaded/total size, speed, and estimated remaining time when the total size is known.
@@ -119,7 +123,7 @@ The gallery below highlights the interface redesign introduced in **v0.3.0**.
 | Installer | Inno Setup |
 | Testing | Python `unittest` |
 
-The runtime dependency set is intentionally small: **PySide6** and **requests** are the main third-party dependencies.
+The runtime dependency set is intentionally small: **PySide6** and **requests** are the main third-party dependencies. Optional JavaScript-page resolution uses Playwright and a separate Chromium runtime.
 
 ---
 
@@ -156,6 +160,15 @@ For an editable installation and the `odm` command:
 python -m pip install -e .
 odm
 ```
+
+To enable resolution of JavaScript-driven intermediate pages in a Python installation:
+
+```bat
+python -m pip install -e ".[browser]"
+python -m playwright install chromium
+```
+
+The optional browser runtime is not included in the default dependencies or the standard packaged build. It increases installation size and must be installed separately.
 
 ---
 
@@ -198,7 +211,7 @@ Browser context menu → MV3 extension → Native Messaging Host
   → existing queue, SQLite history and adaptive HTTP engine
 ```
 
-The context menu is available for links, images, video, and audio on HTTP/HTTPS pages. The extension passes the direct resource URL, a suggested filename, and the referring page's origin. The desktop app validates the request and uses the configured download folder, start preference, proxy, speed limit, queue, and existing download engine. The referring origin is stored with the download so HTTP requests can use it when required.
+The context menu is available for links, images, video, and audio on HTTP/HTTPS pages. The extension passes the resource URL and referring page's origin; the desktop engine selects the filename from the final response and its `Content-Disposition` header. The desktop app validates the request and uses the configured download folder, start preference, proxy, speed limit, queue, and existing download engine. The referring origin is stored with the download so HTTP requests can use it when required.
 
 ### Troubleshooting and limitations
 
@@ -218,7 +231,7 @@ Run the complete test suite with:
 python -m unittest discover -s tests -t .
 ```
 
-The current verified suite contains **148 passing tests**. Coverage includes download behavior, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, browser request validation and IPC, completion notifications, and icon loading.
+The current verified suite contains **173 passing tests**. Coverage includes direct downloads, redirects, intermediate HTML resolution, JavaScript navigation capture in headless Chromium, filename selection across redirects, MIME-based extensions, actionable fallback when optional browser support is missing, unsafe redirect blocking, HTTP Range detection and fallback, multi-part transfer integrity and fallback, pause/resume, queue scheduling, retries, shared speed limiting, scheduled starts, restart recovery, event dispatching outside the manager lock, category filtering, system-proxy configuration, search/sorting, list selection and bulk actions, persistence, browser request validation and IPC, completion notifications, and icon loading.
 
 Download-related tests use a **local HTTP server**, so they do not depend on an external download service.
 
@@ -310,7 +323,7 @@ The build produces a folder-based portable application containing the executable
 With [Inno Setup 6 or 7](https://jrsoftware.org/isinfo.php) installed:
 
 ```bat
-"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.2.0.iss"
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.3.0.iss"
 ```
 
 The script reads `dist\Omni Download Manager\*` (relative to the repository root, so it works from any checkout) and writes `installer\Omni-Download-Manager-Setup.exe`.
@@ -386,6 +399,9 @@ describing the project as open source or redistributing it.
 - بازکردن فایل یا پوشهٔ دانلود و کپی لینک.
 - اعلان تکمیل دانلود در ویندوز.
 - پشتیبانی از پروکسی سیستم.
+- دنبال‌کردن ریدایرکت‌های HTTP و روش‌های استاندارد انتقال HTML؛ در صورت نیاز، اجرای اختیاری صفحه‌های JavaScript‌محور با Playwright و Chromium بدون جایگزین‌کردن موتور دانلود فعلی.
+- فعال‌سازی پشتیبانی JavaScript به نصب جداگانهٔ Playwright و Chromium نیاز دارد: `python -m pip install -e ".[browser]"` و سپس `python -m playwright install chromium`.
+- دانلودهای `blob:`، پاسخ‌های مبتنی بر POST، DRM و دورزدن ورود یا سازوکارهای ضدسوءاستفاده پشتیبانی نمی‌شوند؛ کوکی‌های مرورگرِ کاربر نیز به ODM منتقل نمی‌شوند.
 - تم روشن و تاریک با طراحی مدرن.
 - ذخیرهٔ تنظیمات و تاریخچهٔ دانلود.
 
@@ -425,6 +441,15 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+برای فعال‌کردن حل لینک‌های واسطه‌ای JavaScript‌محور در نصب Python:
+
+```bat
+python -m pip install -e ".[browser]"
+python -m playwright install chromium
+```
+
+Playwright و Chromium در وابستگی‌ها یا بستهٔ استاندارد برنامه قرار ندارند و باید جداگانه نصب شوند.
+
 روش جایگزین:
 
 ```bat
@@ -447,7 +472,7 @@ Omni Download Manager.exe
 
 ### نصب‌کنندهٔ Setup
 
-اسکریپت Inno Setup با نام `omni download manager v 0.2.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
+اسکریپت Inno Setup با نام `omni download manager v 0.3.0.iss` همان پوشه را به فایل `installer\Omni-Download-Manager-Setup.exe` تبدیل می‌کند. جزئیات در بخش [ساخت نسخهٔ ویندوز](#-ساخت-نسخهٔ-ویندوز) آمده است.
 
 ## 🌐 اتصال به مرورگر
 
@@ -540,7 +565,7 @@ pyinstaller --noconfirm packaging\omni_download_manager.spec
 با نصب بودن [Inno Setup نسخهٔ ۶ یا ۷](https://jrsoftware.org/isinfo.php):
 
 ```bat
-"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.2.0.iss"
+"C:\Program Files\Inno Setup 7\ISCC.exe" "omni download manager v 0.3.0.iss"
 ```
 
 اسکریپت محتوای `dist\Omni Download Manager\*` را می‌خواند (مسیرها نسبی هستند و از هر checkout کار می‌کنند) و خروجی را در `installer\Omni-Download-Manager-Setup.exe` می‌نویسد.

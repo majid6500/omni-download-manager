@@ -48,9 +48,6 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   const referer = originOf(tab && tab.url);
   if (referer) request.referer = referer;
 
-  const filename = filenameFromUrl(url);
-  if (filename) request.filename = filename;
-
   chrome.runtime.sendNativeMessage(HOST_NAME, request, (response) => {
     const lastError = chrome.runtime.lastError;
     if (lastError) {
@@ -78,16 +75,6 @@ function isWebUrl(value) {
 function originOf(value) {
   if (!isWebUrl(value)) return "";
   return new URL(value).origin + "/";
-}
-
-function filenameFromUrl(value) {
-  try {
-    const path = new URL(value).pathname;
-    const last = path.substring(path.lastIndexOf("/") + 1);
-    return last ? decodeURIComponent(last) : "";
-  } catch {
-    return "";
-  }
 }
 
 function notify(title, message) {

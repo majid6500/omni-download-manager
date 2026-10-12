@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+from omni_download_manager.core.errors import IntermediatePageError
 from omni_download_manager.engine.base import (
     DownloadControl,
     DownloadJob,
     DownloadObserver,
     DownloadOutcome,
 )
+from omni_download_manager.engine.link_resolver import SmartLinkResolver
 from omni_download_manager.engine.http_downloader import HttpDownloader, _existing_partial
 from omni_download_manager.engine.multipart_http_downloader import MultiPartHttpDownloader
 from omni_download_manager.engine.segments import has_segment_files
@@ -38,11 +42,36 @@ class AdaptiveHttpDownloader:
             speed_limiter=self._limiter,
             single=self._single,
         )
+        self._resolver = SmartLinkResolver(user_agent=user_agent)
 
     def set_speed_limit_mib(self, value: float) -> None:
         self._single.set_speed_limit_mib(value)
 
     def download(
+        self, job: DownloadJob, control: DownloadControl, observer: DownloadObserver
+    ) -> DownloadOutcome:
+        try:
+            return self._download_with_strategy(job, control, observer)
+        except IntermediatePageError:
+            if control.stop_requested or job.multipart_resume is not None:
+                raise
+            target = self._resolver.resolve(
+                job.url,
+                control,
+                referer=job.referer,
+                connect_timeout=job.connect_timeout,
+                read_timeout=job.read_timeout,
+                use_system_proxy=job.use_system_proxy,
+            )
+            resolved_job = replace(
+                job,
+                url=target.url,
+                referer=target.referer or job.referer,
+                cookies=target.cookies,
+            )
+            return self._download_with_strategy(resolved_job, control, observer)
+
+    def _download_with_strategy(
         self, job: DownloadJob, control: DownloadControl, observer: DownloadObserver
     ) -> DownloadOutcome:
         if job.transfer_mode == "single":

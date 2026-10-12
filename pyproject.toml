@@ -13,6 +13,9 @@ dependencies = [
     "requests>=2.31,<3",
 ]
 
+[project.optional-dependencies]
+browser = ["playwright>=1.48,<2"]
+
 [project.gui-scripts]
 odm = "omni_download_manager.app:main"
 

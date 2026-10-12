@@ -111,7 +111,7 @@ class EngineTests(unittest.TestCase):
 
     def test_name_from_last_url_segment(self) -> None:
         outcome, _ = self.run_job(self.job("/noname/"))
-        self.assertEqual(outcome.path.name, "noname")
+        self.assertEqual(outcome.path.name, "noname.zip")
 
     def test_existing_file_is_never_overwritten(self) -> None:
         (self.dir / "file.bin").write_bytes(b"precious")

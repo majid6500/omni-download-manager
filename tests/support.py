@@ -19,11 +19,20 @@ ETAG = '"payload-v1"'
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    request_counts: dict[str, int] = {}
+
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            pass
 
     def log_message(self, *args) -> None:  # keep test output clean
         pass
 
     def do_GET(self) -> None:
+        path = self.path.split("?")[0]
+        self.request_counts[path] = self.request_counts.get(path, 0) + 1
         try:
             self._route()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
@@ -49,13 +58,120 @@ class _Handler(BaseHTTPRequestHandler):
                 PAYLOAD[:5000],
                 extra={"Content-Disposition": "attachment; filename*=UTF-8''caf%C3%A9.txt"},
             )
+        elif path == "/movie/direct":
+            self._send_bytes(
+                PAYLOAD,
+                content_type="video/mp4",
+                extra={
+                    "Content-Disposition": (
+                        'attachment; filename="Spider-Man-Brand-New-Day-2026-4k-DUB_1080.mp4"'
+                    )
+                },
+            )
+        elif path == "/movie/extended":
+            self._send_bytes(
+                PAYLOAD,
+                content_type="video/mp4",
+                extra={
+                    "Content-Disposition": (
+                        "attachment; filename*=UTF-8''Caf%C3%A9-vid%C3%A9o.mp4"
+                    )
+                },
+            )
+        elif path == "/movie/redirect":
+            self.send_response(302)
+            self.send_header("Location", "/misleading/4")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/misleading/4":
+            self.send_response(302)
+            self.send_header("Location", "/media/final")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/movie/redirect-url":
+            self.send_response(302)
+            self.send_header("Location", "/misleading-url/4")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/misleading-url/4":
+            self.send_response(302)
+            self.send_header("Location", "/media/final-name")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/media/final":
+            self._send_bytes(
+                PAYLOAD,
+                content_type="video/mp4",
+                extra={
+                    "Content-Disposition": (
+                        'attachment; filename="Spider-Man-Brand-New-Day-2026-4k-DUB_1080.mp4"'
+                    )
+                },
+            )
+        elif path == "/media/final-name":
+            self._send_bytes(PAYLOAD, content_type="video/mp4")
+        elif path == "/movie/by-url":
+            self._send_bytes(PAYLOAD, content_type="video/mp4")
+        elif path == "/movie/4":
+            self._send_bytes(PAYLOAD, content_type="video/mp4")
+        elif path == "/metadata/malformed.mp4":
+            self._send_bytes(
+                PAYLOAD,
+                content_type="video/mp4",
+                extra={"Content-Disposition": 'attachment; filename="'},
+            )
+        elif path == "/metadata/url-name.mp4":
+            self._send_bytes(
+                PAYLOAD,
+                content_type="video/mp4",
+                extra={"Content-Disposition": 'attachment; filename="server-name.mp4"'},
+            )
         elif path == "/noname/":
             self._send_bytes(PAYLOAD[:100], extra={"Content-Type": "application/zip"})
+        elif path == "/no-type.bin":
+            self._send_bytes(PAYLOAD[:5000], content_type=None)
         elif path == "/redirect":
             self.send_response(302)
             self.send_header("Location", "/file.bin")
             self.send_header("Content-Length", "0")
             self.end_headers()
+        elif path == "/unsafe-redirect":
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1/private")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path.startswith("/redirect-count/"):
+            remaining = int(path.rsplit("/", 1)[1])
+            self.send_response(302)
+            destination = (
+                f"/redirect-count/{remaining - 1}" if remaining else "/html-meta"
+            )
+            self.send_header("Location", destination)
+            self.send_header("Connection", "close")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif path == "/html-meta":
+            self._send_html('<meta http-equiv="refresh" content="0; url=/file.bin">')
+        elif path == "/html-meta-no-type":
+            self._send_html(
+                '<meta http-equiv="refresh" content="0; url=/file.bin">',
+                content_type="application/octet-stream",
+            )
+        elif path == "/html-loop":
+            self._send_html('<meta http-equiv="refresh" content="0; url=/html-loop">')
+        elif path == "/html-js":
+            self._send_html(
+                "<script>fetch('/resolve.json').then(r => r.json())"
+                ".then(x => location.assign(x.url))</script>"
+            )
+        elif path == "/html-js-nav":
+            self._send_html(
+                "<script>setTimeout(() => location.assign('/file.bin'), 25)</script>"
+            )
+        elif path == "/html-error":
+            self._send_html("<!doctype html><html><body>Access denied</body></html>")
+        elif path == "/expired":
+            self._send_status(410)
         elif path == "/missing":
             self._send_status(404)
         elif path == "/boom":
@@ -84,6 +200,17 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _send_html(
+        self, content: str, content_type: str | None = "text/html; charset=utf-8"
+    ) -> None:
+        body = content.encode("utf-8")
+        self.send_response(200)
+        if content_type is not None:
+            self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _send_truncated(self) -> None:
         self.send_response(200)
         self.send_header("Content-Length", "100000")
@@ -111,6 +238,7 @@ class _Handler(BaseHTTPRequestHandler):
         piece: int = 65536,
         delay: float = 0.0,
         extra: dict[str, str] | None = None,
+        content_type: str | None = "application/octet-stream",
         fail_range: tuple[int, int] | None = None,
     ) -> None:
         start, status = 0, 200
@@ -138,7 +266,9 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("ETag", etag)
-        self.send_header("Content-Type", (extra or {}).get("Content-Type", "application/octet-stream"))
+        response_content_type = (extra or {}).get("Content-Type", content_type)
+        if response_content_type is not None:
+            self.send_header("Content-Type", response_content_type)
         if ranges:
             self.send_header("Accept-Ranges", "bytes")
         if status == 206:
@@ -169,6 +299,9 @@ class TestServer:
 
     def url(self, path: str) -> str:
         return f"http://127.0.0.1:{self._server.server_address[1]}{path}"
+
+    def request_count(self, path: str) -> int:
+        return _Handler.request_counts.get(path, 0)
 
 
 def wait_for(predicate: Callable[[], bool], timeout: float = 10.0, interval: float = 0.02) -> bool:

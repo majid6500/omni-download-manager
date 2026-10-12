@@ -30,6 +30,7 @@ from omni_download_manager.engine.base import (
     TransferMetadata,
 )
 from omni_download_manager.engine.filenames import derive_filename, finalize_partial, reserve_partial
+from omni_download_manager.engine.response import HTML_CONTENT_TYPES, looks_like_markup
 from omni_download_manager.engine.http_downloader import (
     HttpDownloader,
     apply_session_headers,
@@ -54,6 +55,7 @@ from omni_download_manager.engine.segments import (
     total_downloaded_from_state,
 )
 from omni_download_manager.engine.speed import DownloadSpeedLimiter, SpeedMeter
+from omni_download_manager.engine.url_security import request_with_safe_redirects
 
 logger = logging.getLogger(__name__)
 
@@ -159,13 +161,20 @@ class MultiPartHttpDownloader:
             proxies = None if job.use_system_proxy else {"http": "", "https": ""}
             head = None
             try:
-                head = session.head(
+                head = request_with_safe_redirects(
+                    session,
+                    "HEAD",
                     job.url,
-                    allow_redirects=True,
+                    source_url=job.url,
                     timeout=(job.connect_timeout, job.read_timeout),
                     proxies=proxies,
                 )
                 if head.status_code >= 400:
+                    head = None
+                elif (
+                    head.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                    in HTML_CONTENT_TYPES
+                ):
                     head = None
             except requests.RequestException:
                 head = None
@@ -176,9 +185,12 @@ class MultiPartHttpDownloader:
             last_modified = head.headers.get("Last-Modified") if head is not None else None
 
             try:
-                response = session.get(
+                response = request_with_safe_redirects(
+                    session,
+                    "GET",
                     url,
-                    headers={"Range": "bytes=0-0"},
+                    source_url=job.url,
+                    headers={"Range": "bytes=0-1023"},
                     stream=True,
                     timeout=(job.connect_timeout, job.read_timeout),
                     proxies=proxies,
@@ -187,6 +199,7 @@ class MultiPartHttpDownloader:
                 raise translate_request_error(exc) from exc
 
             with closing(response):
+                final_url = response.url
                 if response.status_code != 206:
                     logger.debug(
                         "Range probe for %s returned %s (expected 206)",
@@ -207,14 +220,28 @@ class MultiPartHttpDownloader:
                         declared_total,
                     )
                     return None
-                if int(match.group(1)) != 0 or int(match.group(2)) != 0:
+                if (
+                    int(match.group(1)) != 0
+                    or int(match.group(2)) != min(1023, declared_total - 1)
+                ):
                     return None
                 probe_length = _int_or_none(range_headers.get("Content-Length"))
-                if probe_length is not None and probe_length != 1:
+                if probe_length is not None and probe_length != int(match.group(2)) + 1:
                     return None
                 if total is None:
                     total = declared_total
                 if total <= 0:
+                    return None
+                content_type = (
+                    range_headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+                )
+                if content_type in HTML_CONTENT_TYPES:
+                    return None
+                try:
+                    probe_prefix = b"".join(response.iter_content(1024))
+                except requests.RequestException as exc:
+                    raise translate_request_error(exc, during_transfer=True) from exc
+                if looks_like_markup(probe_prefix):
                     return None
                 if etag is None:
                     etag = range_headers.get("ETag")
@@ -227,9 +254,9 @@ class MultiPartHttpDownloader:
             filename = (
                 job.filename
                 if job.filename_resolved
-                else derive_filename(url, dict(range_headers))
+                else derive_filename(final_url, dict(range_headers), job.url)
             )
-            return _ProbeResult(url, filename, total, etag, last_modified)
+            return _ProbeResult(final_url, filename, total, etag, last_modified)
 
     # ------------------------------------------------------------------ run
 
@@ -571,8 +598,11 @@ class MultiPartHttpDownloader:
                 headers["If-Range"] = validator
 
             try:
-                response = session.get(
+                response = request_with_safe_redirects(
+                    session,
+                    "GET",
                     job.url,
+                    source_url=job.url,
                     headers=headers,
                     stream=True,
                     timeout=(job.connect_timeout, job.read_timeout),
